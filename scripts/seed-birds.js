@@ -231,13 +231,27 @@ async function main() {
   const namesFile = path.join(TAXDUMP_DIR, 'names.dmp');
 
   if (fs.existsSync(nodesFile)) {
-    console.log('taxdump already extracted — skipping download.');
+    console.log('taxdump already extracted — skipping download and extraction.');
   } else {
-    console.log(`Downloading taxdump from NCBI...`);
-    await downloadFile(TAXDUMP_URL, TAXDUMP_TGZ);
+    if (!fs.existsSync(TAXDUMP_TGZ)) {
+      console.log(`Downloading taxdump from NCBI...`);
+      await downloadFile(TAXDUMP_URL, TAXDUMP_TGZ);
+    } else {
+      console.log('taxdump.tar.gz already downloaded — skipping download.');
+    }
 
     console.log('Extracting taxdump.tar.gz...');
-    await execAsync(`tar -xzf "${TAXDUMP_TGZ}" -C "${TAXDUMP_DIR}"`);
+    // Use POSIX-style paths so Git Bash tar doesn't misinterpret drive letters as hosts.
+    // On Windows, fall back to PowerShell if the POSIX path form still fails.
+    const posix = (p) => p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+    try {
+      await execAsync(`tar -xzf "${posix(TAXDUMP_TGZ)}" -C "${posix(TAXDUMP_DIR)}"`);
+    } catch {
+      // Fallback: use PowerShell on Windows
+      await execAsync(
+        `powershell -Command "& { $null = New-Item -ItemType Directory -Force '${TAXDUMP_DIR}'; tar -xzf '${TAXDUMP_TGZ}' -C '${TAXDUMP_DIR}' }"`,
+      );
+    }
     console.log('Extraction complete.');
   }
 
@@ -250,17 +264,29 @@ async function main() {
   // Step 4: Parse names
   const namesMap = await parseNames(namesFile, avesNodes);
 
-  // Step 5: Filter to species-rank nodes with a common name
+  // Step 5: Filter to species-rank nodes with a common name.
+  // Deduplicate by commonName — NCBI has multiple species sharing the same common name.
+  // Per PRD: "One species per common name; use the most globally recognized."
+  // Strategy: prefer genbank common name entries; for ties, keep the first encountered.
   console.log('Filtering to named bird species...');
   const speciesWithNames = [];
+  const seenCommonNames = new Set();
+
   for (const taxId of avesNodes) {
     const node = nodeMap.get(taxId);
     if (!node || node.rank !== 'species') continue;
     const names = namesMap.get(taxId);
     if (!names || !names.commonName) continue;
+
+    const normalised = names.commonName.toLowerCase().trim();
+    if (seenCommonNames.has(normalised)) {
+      // Duplicate common name — skip this species per PRD rule
+      continue;
+    }
+    seenCommonNames.add(normalised);
     speciesWithNames.push(taxId);
   }
-  console.log(`  Found ${speciesWithNames.length.toLocaleString()} species with common names.`);
+  console.log(`  Found ${speciesWithNames.length.toLocaleString()} species with unique common names.`);
 
   // Step 6: Build Bird and TaxonomyNode documents
   console.log('Building documents...');
