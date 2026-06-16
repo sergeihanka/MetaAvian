@@ -13,7 +13,10 @@ import Slide from '@mui/material/Slide';
 import CloseIcon from '@mui/icons-material/Close';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import AddToHomeScreenIcon from '@mui/icons-material/AddToHomeScreen';
+import IosShareIcon from '@mui/icons-material/IosShare';
 import { useGame } from '../context/GameContext.jsx';
+import { useInstallPrompt } from '../context/InstallPromptContext.jsx';
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -22,6 +25,7 @@ const Transition = React.forwardRef(function Transition(props, ref) {
 export default function SettingsSheet() {
   const { state, dispatch } = useGame();
   const { showSettings, darkMode, colorblindMode } = state;
+  const { isStandalone, isIos, canInstall, promptInstall } = useInstallPrompt();
 
   const handleClose = () => dispatch({ type: 'TOGGLE_SETTINGS' });
 
@@ -122,6 +126,54 @@ export default function SettingsSheet() {
           </Box>
 
           <Divider />
+
+          {/* Add to Home Screen — only when not already running as installed app */}
+          {!isStandalone && canInstall && (
+            <>
+              {isIos ? (
+                /* iOS: show inline instructions, no button */
+                <Box sx={{ py: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AddToHomeScreenIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                    <Typography variant="body1">Add to Home Screen</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, pl: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary">Tap</Typography>
+                    <IosShareIcon sx={{ fontSize: 14, color: 'primary.main' }} />
+                    <Typography variant="caption" color="text.secondary">
+                      then <strong>Add to Home Screen</strong>
+                    </Typography>
+                  </Box>
+                </Box>
+              ) : (
+                <Box
+                  component="button"
+                  onClick={promptInstall}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    px: 0,
+                    py: 1.5,
+                    textAlign: 'left',
+                    '&:hover': { opacity: 0.7 },
+                  }}
+                  aria-label="Add to Home Screen"
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AddToHomeScreenIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                    <Typography variant="body1">Add to Home Screen</Typography>
+                  </Box>
+                  <ChevronRightIcon sx={{ color: 'text.disabled' }} />
+                </Box>
+              )}
+              <Divider />
+            </>
+          )}
 
           <Box
             component="button"

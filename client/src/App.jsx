@@ -23,6 +23,7 @@ import SettingsSheet from './components/SettingsSheet.jsx';
 import StatsScreen from './components/StatsScreen.jsx';
 import AboutScreen from './components/AboutScreen.jsx';
 import AccountSheet from './components/AccountSheet.jsx';
+import InstallBanner from './components/InstallBanner.jsx';
 
 // Handle OAuth token in URL hash — extract before first render
 function extractTokenFromHash() {
@@ -233,6 +234,7 @@ export default function App() {
       <StatsScreen />
       <AboutScreen />
       <AccountSheet />
+      <InstallBanner />
     </Box>
   );
 }

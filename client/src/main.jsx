@@ -4,6 +4,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { theme } from './theme.js';
 import { GameProvider } from './context/GameContext.jsx';
+import { InstallPromptProvider } from './context/InstallPromptContext.jsx';
 import App from './App.jsx';
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
@@ -21,8 +22,10 @@ const root = createRoot(container);
 root.render(
   <ThemeProvider theme={theme}>
     <CssBaseline />
-    <GameProvider>
-      <App />
-    </GameProvider>
+    <InstallPromptProvider>
+      <GameProvider>
+        <App />
+      </GameProvider>
+    </InstallPromptProvider>
   </ThemeProvider>
 );
