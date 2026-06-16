@@ -1,0 +1,49 @@
+import { createTheme } from '@mui/material/styles';
+
+export const theme = createTheme({
+  palette: {
+    primary: { main: '#1565C0' },
+    secondary: { main: '#0288D1' },
+    background: { default: '#F8FAFB', paper: '#FFFFFF' },
+    success: { main: '#2E7D32' },
+  },
+  typography: {
+    fontFamily:
+      "-apple-system, 'SF Pro Text', BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+  },
+  shape: { borderRadius: 12 },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 24,
+          textTransform: 'none',
+          fontWeight: 600,
+          minHeight: 44,
+        },
+      },
+    },
+    MuiTextField: {
+      styleOverrides: {
+        root: {
+          '& .MuiOutlinedInput-root': { borderRadius: 14 },
+        },
+      },
+    },
+    MuiChip: {
+      styleOverrides: {
+        root: { borderRadius: 10, fontSize: '13px' },
+      },
+    },
+    MuiDialog: {
+      styleOverrides: {
+        paper: {
+          borderRadius: '16px 16px 0 0',
+          margin: 0,
+          width: '100%',
+          maxWidth: '100%',
+        },
+      },
+    },
+  },
+});
