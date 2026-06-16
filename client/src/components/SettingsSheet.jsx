@@ -11,6 +11,8 @@ import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import Slide from '@mui/material/Slide';
 import CloseIcon from '@mui/icons-material/Close';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { useGame } from '../context/GameContext.jsx';
 
 const Transition = React.forwardRef(function Transition(props, ref) {
@@ -117,6 +119,37 @@ export default function SettingsSheet() {
               label=""
               sx={{ mr: 0 }}
             />
+          </Box>
+
+          <Divider />
+
+          <Box
+            component="button"
+            onClick={() => {
+              dispatch({ type: 'TOGGLE_SETTINGS' });
+              dispatch({ type: 'TOGGLE_ABOUT' });
+            }}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              py: 1.5,
+              width: '100%',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              p: 0,
+              py: 1.5,
+              textAlign: 'left',
+              '&:hover': { opacity: 0.7 },
+            }}
+            aria-label="Open About"
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <InfoOutlinedIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+              <Typography variant="body1">About MetaAviary</Typography>
+            </Box>
+            <ChevronRightIcon sx={{ color: 'text.disabled' }} />
           </Box>
         </Box>
       </DialogContent>

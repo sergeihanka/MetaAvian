@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -8,25 +8,31 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Avatar from "@mui/material/Avatar";
-import Divider from "@mui/material/Divider";
 import Alert from "@mui/material/Alert";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import CircularProgress from "@mui/material/CircularProgress";
 import LinearProgress from "@mui/material/LinearProgress";
+import Divider from "@mui/material/Divider";
 import InputAdornment from "@mui/material/InputAdornment";
 import Slide from "@mui/material/Slide";
 import CloseIcon from "@mui/icons-material/Close";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CancelIcon from "@mui/icons-material/Cancel";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
+import BarChartIcon from "@mui/icons-material/BarChart";
+import EmojiEventsOutlinedIcon from "@mui/icons-material/EmojiEventsOutlined";
 import { useGame } from "../context/GameContext.jsx";
-import { login, register, forgotPassword } from "../services/api.js";
+import { login, register, forgotPassword, resendVerification, getUserStats } from "../services/api.js";
+import { GAME_STATE_KEY_PREFIX } from "../config.js";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
+
+const RESEND_COOLDOWN_SECS = 120;
 
 // ─── Password strength ───────────────────────────────────────────────────────
 
@@ -85,39 +91,208 @@ function PasswordStrength({ password }) {
   );
 }
 
-// ─── Signed-in view ──────────────────────────────────────────────────────────
+// ─── Resend button ───────────────────────────────────────────────────────────
 
-function SignedInView({ user, dispatch }) {
-  const initial = user.displayName
-    ? user.displayName[0].toUpperCase()
-    : user.email
-      ? user.email[0].toUpperCase()
-      : "?";
+function ResendButton({ email }) {
+  const [cooldown, setCooldown] = useState(0); // seconds remaining
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const timerRef = useRef(null);
+
+  const startCooldown = () => {
+    setCooldown(RESEND_COOLDOWN_SECS);
+    timerRef.current = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) { clearInterval(timerRef.current); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  useEffect(() => () => clearInterval(timerRef.current), []);
+
+  const handleResend = async () => {
+    if (cooldown > 0 || sending) return;
+    setSending(true);
+    try {
+      await resendVerification(email);
+      setSent(true);
+      startCooldown();
+    } catch {
+      // resend always returns 200, so errors are network-only
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const mins = String(Math.floor(cooldown / 60)).padStart(1, "0");
+  const secs = String(cooldown % 60).padStart(2, "0");
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "center", py: 2 }}>
-      <Avatar
-        sx={{ width: 64, height: 64, bgcolor: "primary.main", fontSize: 28, fontWeight: 700 }}
-        aria-label={`Avatar for ${user.displayName || user.email}`}
-      >
-        {initial}
-      </Avatar>
-      <Box sx={{ textAlign: "center" }}>
-        {user.displayName && (
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>{user.displayName}</Typography>
-        )}
-        <Typography variant="body2" color="text.secondary">{user.email}</Typography>
-      </Box>
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+      <Typography variant="body2" color="text.secondary">
+        {sent ? "Verification email sent." : "Didn't receive the email?"}
+      </Typography>
       <Button
+        size="small"
         variant="outlined"
-        color="error"
-        fullWidth
-        onClick={() => dispatch({ type: "SIGN_OUT" })}
-        sx={{ mt: 1 }}
-        aria-label="Sign out of your account"
+        disabled={cooldown > 0 || sending}
+        onClick={handleResend}
+        sx={{ minHeight: 36, fontSize: "12px", borderRadius: 2 }}
       >
-        Sign Out
+        {sending
+          ? <CircularProgress size={14} color="inherit" />
+          : cooldown > 0
+            ? `Resend in ${mins}:${secs}`
+            : "Resend email"}
       </Button>
+    </Box>
+  );
+}
+
+// ─── Local stats helper (mirrors StatsScreen logic) ──────────────────────────
+
+function computeLocalStats() {
+  const keys = Object.keys(localStorage).filter((k) => k.startsWith(GAME_STATE_KEY_PREFIX));
+  let played = 0, won = 0, streakCount = 0, maxStreak = 0;
+  let lastDate = null;
+  const sorted = keys
+    .map((k) => ({ date: k.replace(GAME_STATE_KEY_PREFIX, ""), key: k }))
+    .sort((a, b) => (a.date > b.date ? 1 : -1));
+  for (const { date, key } of sorted) {
+    try {
+      const data = JSON.parse(localStorage.getItem(key) || "{}");
+      if (!data.phase || data.phase === "loading" || data.phase === "idle") continue;
+      played++;
+      if (data.phase === "won") {
+        won++;
+        if (lastDate) {
+          const diff = (new Date(date) - new Date(lastDate)) / 86400000;
+          streakCount = diff === 1 ? streakCount + 1 : 1;
+        } else { streakCount = 1; }
+        lastDate = date;
+      } else { streakCount = 0; lastDate = null; }
+      maxStreak = Math.max(maxStreak, streakCount);
+    } catch { /* skip */ }
+  }
+  return {
+    played,
+    won,
+    winRate: played > 0 ? Math.round((won / played) * 100) : 0,
+    currentStreak: streakCount,
+    maxStreak,
+  };
+}
+
+// ─── Signed-in view ──────────────────────────────────────────────────────────
+
+function SignedInView({ user, state, dispatch }) {
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  const initial = user.displayName
+    ? user.displayName[0].toUpperCase()
+    : user.email?.[0]?.toUpperCase() ?? "?";
+
+  const gameOver = state.phase === "won" || state.phase === "lost";
+
+  useEffect(() => {
+    setStatsLoading(true);
+    getUserStats()
+      .then((data) => setStats(data))
+      .catch(() => setStats(computeLocalStats()))
+      .finally(() => setStatsLoading(false));
+  }, []);
+
+  const handleViewResults = () => {
+    dispatch({ type: "TOGGLE_ACCOUNT" });
+    dispatch({ type: "TOGGLE_RESULTS" });
+  };
+
+  const handleViewStats = () => {
+    dispatch({ type: "TOGGLE_ACCOUNT" });
+    dispatch({ type: "TOGGLE_STATS" });
+  };
+
+  const statItems = stats
+    ? [
+        { label: "Played",  value: stats.played ?? 0 },
+        { label: "Win %",   value: `${stats.winRate ?? 0}%` },
+        { label: "Streak",  value: stats.currentStreak ?? 0 },
+        { label: "Best",    value: stats.maxStreak ?? 0 },
+      ]
+    : null;
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, py: 1 }}>
+      {/* Avatar + identity */}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Avatar
+          sx={{ width: 52, height: 52, bgcolor: "primary.main", fontSize: 22, fontWeight: 700, flexShrink: 0 }}
+          aria-label={`Avatar for ${user.displayName || user.email}`}
+        >
+          {initial}
+        </Avatar>
+        <Box sx={{ minWidth: 0 }}>
+          {user.displayName && (
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }}>{user.displayName}</Typography>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-all" }}>{user.email}</Typography>
+        </Box>
+      </Box>
+
+      <Divider />
+
+      {/* Stats row */}
+      {statsLoading ? (
+        <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}>
+          <CircularProgress size={20} color="inherit" />
+        </Box>
+      ) : statItems ? (
+        <Box sx={{ display: "flex", textAlign: "center" }}>
+          {statItems.map(({ label, value }) => (
+            <Box key={label} sx={{ flex: 1 }}>
+              <Typography variant="h5" sx={{ fontWeight: 700, lineHeight: 1.1 }}>{value}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {label}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
+
+      {/* Action buttons */}
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        {gameOver && (
+          <Button
+            variant="contained"
+            fullWidth
+            startIcon={<EmojiEventsOutlinedIcon />}
+            onClick={handleViewResults}
+            aria-label="View today's results"
+          >
+            View Today's Results
+          </Button>
+        )}
+        <Button
+          variant="outlined"
+          fullWidth
+          startIcon={<BarChartIcon />}
+          onClick={handleViewStats}
+          aria-label="View full stats"
+        >
+          Full Stats
+        </Button>
+        <Button
+          variant="outlined"
+          color="error"
+          fullWidth
+          onClick={() => dispatch({ type: "SIGN_OUT" })}
+          aria-label="Sign out of your account"
+        >
+          Sign Out
+        </Button>
+      </Box>
     </Box>
   );
 }
@@ -125,15 +300,19 @@ function SignedInView({ user, dispatch }) {
 // ─── Auth form ───────────────────────────────────────────────────────────────
 
 function EmailAuthForm({ dispatch, onClose }) {
-  const [tab, setTab] = useState(0); // 0 = Sign In, 1 = Create Account
+  const [tab, setTab] = useState(0);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [showResend, setShowResend] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState("");
 
   const isRegister = tab === 1;
 
@@ -142,13 +321,17 @@ function EmailAuthForm({ dispatch, onClose }) {
   const handleTabChange = (_, newVal) => {
     setTab(newVal);
     clearState();
-    setFirstName("");
-    setLastName("");
-    setPassword("");
-    setShowPassword(false);
+    setFirstName(""); setLastName("");
+    setPassword(""); setConfirmPassword("");
+    setShowPassword(false); setShowConfirm(false);
+    setShowResend(false); setRegisteredEmail("");
   };
 
   const allRulesPassed = RULES.every((r) => r.test(password));
+  const passwordsMatch = confirmPassword === "" || password === confirmPassword;
+  const confirmDirty = confirmPassword.length > 0;
+  const confirmMatch = confirmDirty && password === confirmPassword;
+  const confirmMismatch = confirmDirty && password !== confirmPassword;
 
   const handleSubmit = async () => {
     if (!email || !password) {
@@ -164,11 +347,15 @@ function EmailAuthForm({ dispatch, onClose }) {
         setError("Please meet all password requirements before continuing.");
         return;
       }
+      if (password !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
     }
 
     setLoading(true);
-    setError(null);
-    setSuccess(null);
+    clearState();
+    setShowResend(false);
 
     try {
       if (!isRegister) {
@@ -177,10 +364,17 @@ function EmailAuthForm({ dispatch, onClose }) {
         onClose();
       } else {
         await register(email, password, firstName.trim(), lastName.trim());
+        setRegisteredEmail(email);
         setSuccess("Account created! Check your email to verify your address before signing in.");
+        setShowResend(true);
       }
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
+      // Show resend if login blocked because email isn't verified
+      if (err.data?.resendAvailable) {
+        setRegisteredEmail(email);
+        setShowResend(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -200,11 +394,15 @@ function EmailAuthForm({ dispatch, onClose }) {
     }
   };
 
+  const submitDisabled = loading
+    || (isRegister && password.length > 0 && !allRulesPassed)
+    || (isRegister && confirmMismatch);
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Tabs value={tab} onChange={handleTabChange} variant="fullWidth" aria-label="Authentication tab">
-        <Tab label="Sign In" aria-label="Switch to sign in tab" />
-        <Tab label="Create Account" aria-label="Switch to create account tab" />
+        <Tab label="Sign In" />
+        <Tab label="Create Account" />
       </Tabs>
 
       {/* Name fields — registration only */}
@@ -233,13 +431,14 @@ function EmailAuthForm({ dispatch, onClose }) {
         label="Email"
         type="email"
         value={email}
-        onChange={(e) => { setEmail(e.target.value); clearState(); }}
+        onChange={(e) => { setEmail(e.target.value); clearState(); setShowResend(false); }}
         fullWidth
         autoComplete="email"
         inputProps={{ "aria-label": "Email address" }}
         onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
       />
 
+      {/* Password + strength */}
       <Box>
         <TextField
           label="Password"
@@ -249,7 +448,7 @@ function EmailAuthForm({ dispatch, onClose }) {
           fullWidth
           autoComplete={isRegister ? "new-password" : "current-password"}
           inputProps={{ "aria-label": "Password" }}
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          onKeyDown={(e) => e.key === "Enter" && !isRegister && handleSubmit()}
           InputProps={{
             endAdornment: (
               <InputAdornment position="end">
@@ -265,19 +464,63 @@ function EmailAuthForm({ dispatch, onClose }) {
             ),
           }}
         />
-
-        {/* Strength meter — registration only */}
         {isRegister && <PasswordStrength password={password} />}
       </Box>
 
+      {/* Confirm password — registration only */}
+      {isRegister && (
+        <TextField
+          label="Confirm password"
+          type={showConfirm ? "text" : "password"}
+          value={confirmPassword}
+          onChange={(e) => { setConfirmPassword(e.target.value); clearState(); }}
+          fullWidth
+          autoComplete="new-password"
+          inputProps={{ "aria-label": "Confirm password" }}
+          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          error={confirmMismatch}
+          helperText={
+            confirmMismatch
+              ? "Passwords do not match."
+              : confirmMatch
+                ? "Passwords match."
+                : ""
+          }
+          FormHelperTextProps={{
+            sx: { color: confirmMatch ? "#169A43" : undefined, fontWeight: confirmMatch ? 600 : undefined },
+          }}
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">
+                {confirmMatch && <CheckCircleIcon sx={{ fontSize: 18, color: "#169A43", mr: 0.5 }} />}
+                {confirmMismatch && <CancelIcon sx={{ fontSize: 18, color: "#EF2A2A", mr: 0.5 }} />}
+                <IconButton
+                  aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}
+                  onClick={() => setShowConfirm((v) => !v)}
+                  edge="end"
+                  size="small"
+                >
+                  {showConfirm ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+        />
+      )}
+
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       {success && <Alert severity="success" onClose={() => setSuccess(null)}>{success}</Alert>}
+
+      {/* Resend verification */}
+      {showResend && registeredEmail && (
+        <ResendButton email={registeredEmail} />
+      )}
 
       <Button
         variant="contained"
         fullWidth
         onClick={handleSubmit}
-        disabled={loading || (isRegister && password.length > 0 && !allRulesPassed)}
+        disabled={submitDisabled}
         aria-label={isRegister ? "Create your account" : "Sign in with email"}
       >
         {loading
@@ -323,7 +566,7 @@ export default function AccountSheet() {
           borderRadius: "16px 16px 0 0",
           width: "100%",
           maxWidth: "100%",
-          maxHeight: "90vh",
+          maxHeight: "92vh",
           overflowY: "auto",
         },
         "& .MuiDialog-container": { alignItems: "flex-end" },
@@ -347,7 +590,7 @@ export default function AccountSheet() {
 
       <DialogContent sx={{ pb: 4 }}>
         {user
-          ? <SignedInView user={user} dispatch={dispatch} />
+          ? <SignedInView user={user} state={state} dispatch={dispatch} />
           : <EmailAuthForm dispatch={dispatch} onClose={handleClose} />}
       </DialogContent>
     </Dialog>
