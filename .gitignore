@@ -9,7 +9,7 @@ client/node_modules/
 client/dist/
 
 # Environment variables (never commit secrets)
-.env
+*.env
 
 # Taxonomy dump files (large, downloaded at runtime)
 /tmp/taxdump*
@@ -18,3 +18,4 @@ client/dist/
 # OS files
 .DS_Store
 Thumbs.db
+*.docx

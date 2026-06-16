@@ -41,7 +41,7 @@ export default function TopNav() {
         >
           <Box
             component="img"
-            src="/icons/icon-192.png"
+            src="/icons/icon-192-nb.png"
             alt=""
             aria-hidden="true"
             sx={{ width: 32, height: 32, borderRadius: '8px' }}
@@ -51,7 +51,7 @@ export default function TopNav() {
             component="h1"
             sx={{ fontWeight: 700, letterSpacing: 2, color: 'primary.main' }}
           >
-            AVIARY
+            MetaAviary
           </Typography>
         </Box>
 
