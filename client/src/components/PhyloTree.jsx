@@ -90,10 +90,9 @@ function WikiDialog({ node, onClose }) {
     setStatus('loading');
     setData(null);
 
-    // Try scientific name first, fall back to common name for leaf/mystery nodes
     const term = node.name && node.name !== '?' ? node.name : node.commonName;
 
-    fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term)}`)
+    fetch(`/api/v1/wiki?q=${encodeURIComponent(term)}`)
       .then((r) => {
         if (!r.ok) throw new Error('not found');
         return r.json();
@@ -123,11 +122,26 @@ function WikiDialog({ node, onClose }) {
         )}
         {status === 'error' && (
           <Typography variant="body2" color="text.secondary">
-            No Wikipedia article found for "{node?.name}".
+            No Wikipedia article found for &ldquo;{node?.name}&rdquo;.
           </Typography>
         )}
         {status === 'ok' && data && (
           <>
+            {data.thumbnail?.source && (
+              <Box
+                component="img"
+                src={data.thumbnail.source}
+                alt={data.title}
+                sx={{
+                  width: '100%',
+                  maxHeight: 220,
+                  objectFit: 'cover',
+                  borderRadius: 2,
+                  mb: 1.5,
+                  display: 'block',
+                }}
+              />
+            )}
             {data.description && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 {data.description}

@@ -16,6 +16,7 @@ import birdsRouter from './src/routes/birds.js';
 import puzzleRouter from './src/routes/puzzle.js';
 import usersRouter from './src/routes/users.js';
 import statsRouter from './src/routes/stats.js';
+import wikiRouter from './src/routes/wiki.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +33,20 @@ app.set('trust proxy', 1);
 // ---------------------------------------------------------------------------
 app.use(
   helmet({
-    contentSecurityPolicy: config.isProduction ? undefined : false,
+    contentSecurityPolicy: config.isProduction
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:', 'https://upload.wikimedia.org'],
+            connectSrc: ["'self'"],
+            fontSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            frameSrc: ["'none'"],
+          },
+        }
+      : false,
   })
 );
 
@@ -91,6 +105,7 @@ app.use('/api/v1/birds', birdsRouter);
 app.use('/api/v1/puzzle', puzzleRouter);
 app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/stats', statsRouter);
+app.use('/api/v1/wiki', wikiRouter);
 
 // ---------------------------------------------------------------------------
 // Serve React client in production
