@@ -112,7 +112,15 @@ app.use('/api/v1/wiki', wikiRouter);
 // ---------------------------------------------------------------------------
 if (config.isProduction) {
   const clientDistPath = path.join(__dirname, 'client', 'dist');
-  app.use(express.static(clientDistPath));
+  app.use(express.static(clientDistPath, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
+  }));
 
   // Catch-all: serve index.html for any non-API route (SPA routing)
   app.get('/{*path}', (req, res) => {
