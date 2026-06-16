@@ -1,7 +1,7 @@
 {
-  "name": "Aviary",
-  "short_name": "Aviary",
-  "description": "Daily bird taxonomy guessing game",
+  "name": "MetaAvian — Daily Bird Game",
+  "short_name": "MetaAvian",
+  "description": "Guess today's mystery bird using taxonomy clues. Free daily bird game for birders, bird watchers, and nature enthusiasts.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F8FAFB",
