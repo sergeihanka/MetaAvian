@@ -56,8 +56,8 @@ export function login(email, password) {
   return request('POST', '/auth/login', { email, password });
 }
 
-export function register(email, password) {
-  return request('POST', '/auth/register', { email, password });
+export function register(email, password, firstName, lastName) {
+  return request('POST', '/auth/register', { email, password, firstName, lastName });
 }
 
 export function getUserStats() {

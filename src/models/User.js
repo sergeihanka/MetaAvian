@@ -19,6 +19,8 @@ const userSchema = new mongoose.Schema({
   },
   googleId: String,
   appleId: String,
+  firstName: String,
+  lastName: String,
   displayName: String,
   avatarUrl: String,
   passwordResetToken: String,

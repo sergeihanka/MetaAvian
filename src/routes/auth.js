@@ -103,13 +103,28 @@ router.post('/apple/events', (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/register', authLimiter, async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, firstName, lastName } = req.body;
 
   if (!email || !isValidEmail(email)) {
     return res.status(400).json({ error: 'A valid email address is required.' });
   }
+  if (!firstName || !firstName.trim()) {
+    return res.status(400).json({ error: 'First name is required.' });
+  }
+  if (!lastName || !lastName.trim()) {
+    return res.status(400).json({ error: 'Last name is required.' });
+  }
   if (!password || password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
+  if (!/[A-Z]/.test(password)) {
+    return res.status(400).json({ error: 'Password must contain at least one uppercase letter.' });
+  }
+  if (!/[0-9]/.test(password)) {
+    return res.status(400).json({ error: 'Password must contain at least one number.' });
+  }
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return res.status(400).json({ error: 'Password must contain at least one special character.' });
   }
 
   const normalizedEmail = email.toLowerCase().trim();
@@ -120,16 +135,18 @@ router.post('/register', authLimiter, async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
-
   const rawToken = crypto.randomBytes(32).toString('hex');
   const hashedToken = hashToken(rawToken);
-  const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // +24 hours
+  const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
   await User.create({
     email: normalizedEmail,
     emailVerified: false,
     authProvider: 'local',
     passwordHash,
+    firstName: firstName.trim(),
+    lastName: lastName.trim(),
+    displayName: `${firstName.trim()} ${lastName.trim()}`,
     emailVerifyToken: hashedToken,
     emailVerifyExpires: verifyExpires,
   });
