@@ -100,7 +100,7 @@ if (config.isProduction) {
   app.use(express.static(clientDistPath));
 
   // Catch-all: serve index.html for any non-API route (SPA routing)
-  app.get('*', (req, res) => {
+  app.get('/{*path}', (req, res) => {
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 }
