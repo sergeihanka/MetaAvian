@@ -24,7 +24,7 @@ Copy `.env.example` to `.env` and fill in all values before running locally.
 | `APPLE_KEY_ID` | Key ID of the Sign in with Apple private key |
 | `APPLE_PRIVATE_KEY` | Contents of the `.p8` key file, **base64-encoded as a single line** (see below) |
 | `APPLE_CALLBACK_URL` | Must match the redirect URI registered in Apple Developer Portal |
-| `SENDGRID_API_KEY` | SendGrid API key for transactional email (verification, password reset) |
+| `SMTP2GO_API_KEY` | SMTP2Go API key for transactional email (verification, password reset) |
 | `EMAIL_FROM` | Verified sender address (e.g. `noreply@metaavian.com`) |
 | `CLIENT_URL` | Full URL of the front-end app. Dev: `http://localhost:5173`. Prod: `https://meta-avian.herokuapp.com` |
 
@@ -74,7 +74,7 @@ heroku config:set APPLE_TEAM_ID=XXXXXXXXXX --app meta-avian
 heroku config:set APPLE_KEY_ID=XXXXXXXXXX --app meta-avian
 heroku config:set APPLE_PRIVATE_KEY="$(cat AuthKey_XXXXXXXXXX.p8 | base64)" --app meta-avian
 heroku config:set APPLE_CALLBACK_URL=https://meta-avian.herokuapp.com/api/v1/auth/apple/callback --app meta-avian
-heroku config:set SENDGRID_API_KEY=SG.xxxxxxxxxxxxxxxxxxxx --app meta-avian
+heroku config:set SMTP2GO_API_KEY=api-xxxxxxxxxxxxxxxxxxxx --app meta-avian
 heroku config:set EMAIL_FROM=noreply@metaavian.com --app meta-avian
 heroku config:set CLIENT_URL=https://meta-avian.herokuapp.com --app meta-avian
 
@@ -107,20 +107,19 @@ Set the output as `APPLE_PRIVATE_KEY`. The server decodes it back to PEM at star
 
 ---
 
-## DNS for metaavian.com (SendGrid Email Delivery)
+## DNS for metaavian.com (SMTP2Go Email Delivery)
 
-Configure these DNS records in Squarespace to enable transactional email via SendGrid:
+Configure these DNS records in Squarespace to enable transactional email via SMTP2Go:
 
 1. **SPF** — Update your existing SPF TXT record on `metaavian.com`:
    - **Change** `v=spf1 -all` **to** `v=spf1 include:sendgrid.net ~all`
+   - (SMTP2Go shares the `sendgrid.net` SPF include for deliverability)
 
-2. **DKIM** — Add two CNAME records provided by SendGrid after completing domain authentication at [app.sendgrid.com](https://app.sendgrid.com) → Settings → Sender Authentication:
-   - `s1._domainkey.metaavian.com` → CNAME value from SendGrid
-   - `s2._domainkey.metaavian.com` → CNAME value from SendGrid
+2. **DKIM** — Add the CNAME records provided by SMTP2Go after completing domain verification at [app.smtp2go.com](https://app.smtp2go.com) → Sending Domains → Verify.
 
 3. **DMARC** — No changes needed; existing DMARC policy will start passing once SPF and DKIM are verified.
 
-After updating DNS, click **Verify** in the SendGrid domain authentication flow. Propagation can take up to 48 hours.
+After updating DNS, click **Verify** in the SMTP2Go domain verification flow. Propagation can take up to 48 hours.
 
 ---
 

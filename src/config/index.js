@@ -22,7 +22,7 @@ const config = {
       : undefined,
     callbackUrl: process.env.APPLE_CALLBACK_URL,
   },
-  sendgrid: { apiKey: process.env.SENDGRID_API_KEY },
+  smtp2go: { apiKey: process.env.SMTP2GO_API_KEY },
   emailFrom: process.env.EMAIL_FROM || 'noreply@metaavian.com',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   isProduction: process.env.NODE_ENV === 'production',

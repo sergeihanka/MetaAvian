@@ -1,25 +1,35 @@
-import sgMail from '@sendgrid/mail';
 import config from '../config/index.js';
 
-// Configure SendGrid if the API key is available
-if (config.sendgrid.apiKey) {
-  sgMail.setApiKey(config.sendgrid.apiKey);
-} else {
+if (!config.smtp2go.apiKey) {
   console.warn(
-    '[mailer] SENDGRID_API_KEY is not set — email sending is disabled. ' +
+    '[mailer] SMTP2GO_API_KEY is not set — email sending is disabled. ' +
     'Verification and password reset emails will be skipped.'
   );
 }
 
-/**
- * Shared send helper — gracefully degrades when SendGrid is not configured.
- */
-async function send(msg) {
-  if (!config.sendgrid.apiKey) {
-    console.warn('[mailer] Skipping email send (no API key). Would have sent:', msg.subject, 'to', msg.to);
+async function send({ to, subject, html, text }) {
+  if (!config.smtp2go.apiKey) {
+    console.warn('[mailer] Skipping email send (no API key). Would have sent:', subject, 'to', to);
     return;
   }
-  await sgMail.send(msg);
+
+  const res = await fetch('https://api.smtp2go.com/v3/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: config.smtp2go.apiKey,
+      to: [to],
+      sender: config.emailFrom,
+      subject,
+      html_body: html,
+      text_body: text,
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok || data.data?.error) {
+    throw new Error(`[mailer] SMTP2Go error: ${data.data?.error || res.statusText}`);
+  }
 }
 
 /**
@@ -32,7 +42,6 @@ export async function sendVerificationEmail(email, token) {
 
   const msg = {
     to: email,
-    from: config.emailFrom,
     subject: 'Verify your Aviary account',
     html: `
       <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto;">
@@ -70,7 +79,6 @@ export async function sendPasswordResetEmail(email, token) {
 
   const msg = {
     to: email,
-    from: config.emailFrom,
     subject: 'Reset your Aviary password',
     html: `
       <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto;">
