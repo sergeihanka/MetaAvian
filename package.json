@@ -12,7 +12,7 @@
     "start": "node server.js",
     "dev": "concurrently \"nodemon server.js\" \"npm run client:dev\"",
     "client:dev": "cd client && npm run dev",
-    "build": "cd client && npm install --include=dev && npm run build",
+    "build": "cd client && npm install && npm run build",
     "heroku-postbuild": "npm run build",
     "seed:birds": "node scripts/seed-birds.js",
     "seed:puzzles": "node scripts/seed-puzzles.js"
