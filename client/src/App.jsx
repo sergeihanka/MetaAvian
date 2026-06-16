@@ -234,13 +234,11 @@ export default function App() {
 }
 
 async function fetchAndCacheBirdList(today, dispatch) {
-  const birds = await getBirds();
-  // Normalize: API may return array of strings or array of objects
-  const normalized = Array.isArray(birds)
-    ? birds.map((b) =>
-        typeof b === 'string' ? { commonName: b, aliases: [] } : b
-      )
-    : [];
+  const data = await getBirds();
+  const list = data.birds || [];
+  const normalized = list.map((b) =>
+    typeof b === 'string' ? { commonName: b, aliases: [] } : b
+  );
   dispatch({ type: 'LOAD_BIRD_LIST', payload: normalized });
   try {
     localStorage.setItem(BIRD_LIST_KEY, JSON.stringify(normalized));
