@@ -47,7 +47,7 @@ function shuffleArray(arr) {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('=== MetaAviary DB Sync ===\n');
+  console.log('=== MetaAvian DB Sync ===\n');
 
   // ── Step 0: Load curated JSON ─────────────────────────────────────────────
   if (!fs.existsSync(CURATED_JSON)) {

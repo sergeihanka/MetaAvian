@@ -147,7 +147,7 @@ export default function SettingsSheet() {
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <InfoOutlinedIcon fontSize="small" sx={{ color: 'text.secondary' }} />
-              <Typography variant="body1">About MetaAviary</Typography>
+              <Typography variant="body1">About MetaAvian</Typography>
             </Box>
             <ChevronRightIcon sx={{ color: 'text.disabled' }} />
           </Box>

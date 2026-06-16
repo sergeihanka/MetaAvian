@@ -51,7 +51,7 @@ export default function TopNav() {
             component="h1"
             sx={{ fontWeight: 700, letterSpacing: 2, color: 'primary.main' }}
           >
-            MetaAviary
+            MetaAvian
           </Typography>
         </Box>
 
