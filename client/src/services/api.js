@@ -79,3 +79,7 @@ export function forgotPassword(email) {
 export function resetPassword(token, newPassword) {
   return request('POST', '/auth/reset-password', { token, newPassword });
 }
+
+export function cancelRegistration(email) {
+  return request('DELETE', '/auth/cancel-registration', { email });
+}

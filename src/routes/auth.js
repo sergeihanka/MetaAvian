@@ -131,7 +131,10 @@ router.post('/register', authLimiter, async (req, res) => {
 
   const existing = await User.findOne({ email: normalizedEmail });
   if (existing) {
-    return res.status(409).json({ error: 'An account with this email already exists.' });
+    if (existing.emailVerified || existing.authProvider !== 'local') {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
+    // Unverified local account — overwrite with fresh registration details
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
@@ -139,17 +142,27 @@ router.post('/register', authLimiter, async (req, res) => {
   const hashedToken = hashToken(rawToken);
   const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-  await User.create({
-    email: normalizedEmail,
-    emailVerified: false,
-    authProvider: 'local',
-    passwordHash,
-    firstName: firstName.trim(),
-    lastName: lastName.trim(),
-    displayName: `${firstName.trim()} ${lastName.trim()}`,
-    emailVerifyToken: hashedToken,
-    emailVerifyExpires: verifyExpires,
-  });
+  if (existing) {
+    existing.passwordHash = passwordHash;
+    existing.firstName = firstName.trim();
+    existing.lastName = lastName.trim();
+    existing.displayName = `${firstName.trim()} ${lastName.trim()}`;
+    existing.emailVerifyToken = hashedToken;
+    existing.emailVerifyExpires = verifyExpires;
+    await existing.save();
+  } else {
+    await User.create({
+      email: normalizedEmail,
+      emailVerified: false,
+      authProvider: 'local',
+      passwordHash,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      displayName: `${firstName.trim()} ${lastName.trim()}`,
+      emailVerifyToken: hashedToken,
+      emailVerifyExpires: verifyExpires,
+    });
+  }
 
   await sendVerificationEmail(normalizedEmail, rawToken);
 
@@ -321,6 +334,24 @@ router.post('/reset-password', async (req, res) => {
   await user.save();
 
   res.status(200).json({ message: 'Password reset successful.' });
+});
+
+// ---------------------------------------------------------------------------
+// Cancel Registration (delete unverified account + invalidate token)
+// ---------------------------------------------------------------------------
+
+router.delete('/cancel-registration', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+  await User.deleteOne({
+    email: email.toLowerCase().trim(),
+    emailVerified: false,
+    authProvider: 'local',
+  });
+
+  // Always 200 — don't reveal whether the account existed
+  res.status(200).json({ message: 'Registration cancelled.' });
 });
 
 // ---------------------------------------------------------------------------

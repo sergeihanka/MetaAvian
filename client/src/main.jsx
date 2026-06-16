@@ -6,11 +6,13 @@ import { theme } from './theme.js';
 import { GameProvider } from './context/GameContext.jsx';
 import App from './App.jsx';
 
-// Register service worker in production
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {
-    // SW registration failed — non-fatal
+  // Only reload when the SW *changes* (update), not on first install
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) window.location.reload();
   });
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 const container = document.getElementById('root');

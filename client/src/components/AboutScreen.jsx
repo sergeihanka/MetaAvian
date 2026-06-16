@@ -168,6 +168,10 @@ export default function AboutScreen() {
               admin@metaavian.com
             </Typography>
           </Typography>
+
+          <Typography variant="caption" color="text.disabled" sx={{ textAlign: 'center', mt: 1 }}>
+            v{__APP_VERSION__}
+          </Typography>
         </Box>
       </DialogContent>
     </Dialog>

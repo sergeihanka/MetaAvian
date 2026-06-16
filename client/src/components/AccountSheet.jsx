@@ -25,7 +25,7 @@ import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import BarChartIcon from "@mui/icons-material/BarChart";
 import EmojiEventsOutlinedIcon from "@mui/icons-material/EmojiEventsOutlined";
 import { useGame } from "../context/GameContext.jsx";
-import { login, register, forgotPassword, resendVerification, getUserStats } from "../services/api.js";
+import { login, register, forgotPassword, resendVerification, getUserStats, cancelRegistration } from "../services/api.js";
 import { GAME_STATE_KEY_PREFIX } from "../config.js";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
@@ -145,6 +145,56 @@ function ResendButton({ email }) {
           : cooldown > 0
             ? `Resend in ${mins}:${secs}`
             : "Resend email"}
+      </Button>
+    </Box>
+  );
+}
+
+// ─── Pending verification view ───────────────────────────────────────────────
+
+function PendingVerificationView({ email, onCancelled }) {
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    try {
+      await cancelRegistration(email);
+    } catch { /* always succeed locally */ }
+    setCancelling(false);
+    onCancelled();
+  };
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2.5, py: 2, textAlign: "center" }}>
+      <Typography variant="h2" component="div" aria-hidden="true">✉️</Typography>
+      <Box>
+        <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>Check your email</Typography>
+        <Typography variant="body2" color="text.secondary">
+          We sent a verification link to
+        </Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600, wordBreak: "break-all" }}>{email}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          Click the link to activate your account.
+        </Typography>
+      </Box>
+
+      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+        <ResendButton email={email} />
+        <Typography variant="caption" color="text.secondary">
+          Can't find it? Check your spam or junk folder.
+        </Typography>
+      </Box>
+
+      <Button
+        variant="text"
+        size="small"
+        color="error"
+        onClick={handleCancel}
+        disabled={cancelling}
+        sx={{ mt: 1 }}
+        aria-label="Cancel registration and delete this account"
+      >
+        {cancelling ? <CircularProgress size={14} color="inherit" /> : "Cancel registration"}
       </Button>
     </Box>
   );
@@ -313,6 +363,7 @@ function EmailAuthForm({ dispatch, onClose }) {
   const [success, setSuccess] = useState(null);
   const [showResend, setShowResend] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState("");
+  const [registrationPending, setRegistrationPending] = useState(false);
 
   const isRegister = tab === 1;
 
@@ -325,6 +376,14 @@ function EmailAuthForm({ dispatch, onClose }) {
     setPassword(""); setConfirmPassword("");
     setShowPassword(false); setShowConfirm(false);
     setShowResend(false); setRegisteredEmail("");
+    setRegistrationPending(false);
+  };
+
+  const handleCancelled = () => {
+    setRegistrationPending(false);
+    setRegisteredEmail("");
+    setTab(0); // back to Sign In tab
+    clearState();
   };
 
   const allRulesPassed = RULES.every((r) => r.test(password));
@@ -365,8 +424,7 @@ function EmailAuthForm({ dispatch, onClose }) {
       } else {
         await register(email, password, firstName.trim(), lastName.trim());
         setRegisteredEmail(email);
-        setSuccess("Account created! Check your email to verify your address before signing in.");
-        setShowResend(true);
+        setRegistrationPending(true);
       }
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
@@ -397,6 +455,10 @@ function EmailAuthForm({ dispatch, onClose }) {
   const submitDisabled = loading
     || (isRegister && password.length > 0 && !allRulesPassed)
     || (isRegister && confirmMismatch);
+
+  if (registrationPending) {
+    return <PendingVerificationView email={registeredEmail} onCancelled={handleCancelled} />;
+  }
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
