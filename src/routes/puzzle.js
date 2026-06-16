@@ -160,6 +160,55 @@ router.post('/guess', guessLimiter, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/puzzle/hint?level=1|2|3
+// Returns one ancestry node of today's answer at the requested taxonomy level.
+// Level 1 → order, Level 2 → family, Level 3 → genus
+// The client is responsible for deducting the guess cost.
+// ---------------------------------------------------------------------------
+
+router.get('/hint', async (req, res) => {
+  const level = parseInt(req.query.level, 10);
+  if (![1, 2, 3].includes(level)) {
+    return res.status(400).json({ error: 'level must be 1, 2, or 3.' });
+  }
+
+  const puzzle = await getTodayPuzzle();
+  if (!puzzle) {
+    return res.status(404).json({ error: 'No puzzle found for today.' });
+  }
+
+  const bird = puzzle.birdId;
+  const { ancestorPath, ancestorNames, ancestorRanks } = bird;
+
+  const primaryRanks = { 1: ['order'], 2: ['family'], 3: ['genus'] };
+  const fallbackRanks = {
+    1: ['superorder', 'cohort', 'infraclass', 'subclass'],
+    2: ['subfamily', 'superfamily', 'infraorder', 'suborder'],
+    3: ['subgenus', 'species group'],
+  };
+
+  let hintNode = null;
+  for (const rank of [...primaryRanks[level], ...fallbackRanks[level]]) {
+    const i = ancestorRanks.indexOf(rank);
+    if (i !== -1) {
+      hintNode = {
+        taxId: ancestorPath[i],
+        name: ancestorNames[i],
+        rank: ancestorRanks[i],
+        depth: i,
+      };
+      break;
+    }
+  }
+
+  if (!hintNode) {
+    return res.status(404).json({ error: `No suitable taxonomy level found for hint ${level}.` });
+  }
+
+  res.json({ level, hint: hintNode });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/puzzle/result?date=YYYY-MM-DD
 // Reveal the answer — only for past puzzles
 // ---------------------------------------------------------------------------

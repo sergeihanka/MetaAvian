@@ -40,6 +40,10 @@ export function submitGuess({ puzzleDate, birdCommonName }) {
   return request('POST', '/puzzle/guess', { puzzleDate, birdCommonName });
 }
 
+export function getHint(level) {
+  return request('GET', `/puzzle/hint?level=${level}`);
+}
+
 export function getPuzzleResult(date) {
   return request('GET', `/puzzle/result?date=${encodeURIComponent(date)}`);
 }

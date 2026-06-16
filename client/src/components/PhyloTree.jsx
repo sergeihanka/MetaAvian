@@ -2,24 +2,30 @@ import React, { useRef, useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
+import Link from '@mui/material/Link';
 import { useGame } from '../context/GameContext.jsx';
 import { TEMPERATURE_COLORS } from '../config.js';
 
 const ROW_HEIGHT = 90;
 const MIN_NODE_WIDTH = 120;
-const NODE_HEIGHT = 36;
+
+// ─── Layout ─────────────────────────────────────────────────────────────────
 
 function computeLayout(treeNodes, treeEdges, containerWidth) {
   if (!containerWidth || treeNodes.size === 0) return { positions: {}, totalHeight: ROW_HEIGHT };
 
-  // NCBI depths can be large (up to 20+). Compress to display rows by sorting
-  // unique actual depths and mapping them to sequential row indices.
+  // NCBI depths can be large. Compress to sequential display rows.
   const depthSet = new Set();
   for (const [, node] of treeNodes) depthSet.add(node.depth ?? 0);
   const sortedDepths = Array.from(depthSet).sort((a, b) => a - b);
   const depthToRow = new Map(sortedDepths.map((d, i) => [d, i]));
 
-  // Group nodes by display row
   const byRow = new Map();
   for (const [taxId, node] of treeNodes) {
     const row = depthToRow.get(node.depth ?? 0) ?? 0;
@@ -39,10 +45,11 @@ function computeLayout(treeNodes, treeEdges, containerWidth) {
     });
   }
 
-  const numRows = sortedDepths.length;
-  const totalHeight = numRows * ROW_HEIGHT + ROW_HEIGHT / 2;
+  const totalHeight = sortedDepths.length * ROW_HEIGHT + ROW_HEIGHT / 2;
   return { positions, totalHeight };
 }
+
+// ─── Edges ──────────────────────────────────────────────────────────────────
 
 function TreeEdges({ treeEdges, positions }) {
   if (!positions || treeEdges.length === 0) return null;
@@ -55,6 +62,8 @@ function TreeEdges({ treeEdges, positions }) {
         if (!p || !c) return null;
         const yMid = (p.y + c.y) / 2;
         const d = `M ${p.x},${p.y} C ${p.x},${yMid} ${c.x},${yMid} ${c.x},${c.y}`;
+        // Dashed for edges from Aves root (simplified path) or to mystery
+        const dashed = parentId === 8782 || childId === 'mystery';
         return (
           <path
             key={`${parentId}->${childId}`}
@@ -62,7 +71,7 @@ function TreeEdges({ treeEdges, positions }) {
             fill="none"
             stroke="#BDBDBD"
             strokeWidth={1.5}
-            strokeDasharray={parentId === 8782 ? '4 4' : 'none'}
+            strokeDasharray={dashed ? '4 4' : 'none'}
           />
         );
       })}
@@ -70,41 +79,117 @@ function TreeEdges({ treeEdges, positions }) {
   );
 }
 
-function TreeNode({ node, position, isNew }) {
+// ─── Wikipedia dialog ────────────────────────────────────────────────────────
+
+function WikiDialog({ node, onClose }) {
+  const [status, setStatus] = useState('loading'); // loading | ok | error
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    if (!node) return;
+    setStatus('loading');
+    setData(null);
+
+    // Try scientific name first, fall back to common name for leaf/mystery nodes
+    const term = node.name && node.name !== '?' ? node.name : node.commonName;
+
+    fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error('not found');
+        return r.json();
+      })
+      .then((d) => { setData(d); setStatus('ok'); })
+      .catch(() => setStatus('error'));
+  }, [node?.name]);
+
+  const title = node
+    ? `${node.name}${node.rank && node.rank !== 'unknown' ? ` · ${node.rank}` : ''}`
+    : '';
+
+  return (
+    <Dialog
+      open={!!node}
+      onClose={onClose}
+      maxWidth="xs"
+      fullWidth
+      PaperProps={{ sx: { borderRadius: 3, mx: 2 } }}
+    >
+      <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>{title}</DialogTitle>
+      <DialogContent sx={{ pt: 0 }}>
+        {status === 'loading' && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+            <CircularProgress size={28} />
+          </Box>
+        )}
+        {status === 'error' && (
+          <Typography variant="body2" color="text.secondary">
+            No Wikipedia article found for "{node?.name}".
+          </Typography>
+        )}
+        {status === 'ok' && data && (
+          <>
+            {data.description && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                {data.description}
+              </Typography>
+            )}
+            <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
+              {data.extract}
+            </Typography>
+            {data.content_urls?.desktop?.page && (
+              <Link
+                href={data.content_urls.desktop.page}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="caption"
+                sx={{ display: 'block', mt: 1.5 }}
+              >
+                Read on Wikipedia →
+              </Link>
+            )}
+          </>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={onClose} size="small">Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// ─── Node ────────────────────────────────────────────────────────────────────
+
+function TreeNode({ node, position, isNew, onClick }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Trigger animation on mount
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => setMounted(true));
-    });
+    requestAnimationFrame(() => requestAnimationFrame(() => setMounted(true)));
   }, []);
 
   if (!position) return null;
 
   const isRoot = node.taxId === 8782;
   const isLeaf = node.isLeaf;
-  const color = isLeaf
-    ? TEMPERATURE_COLORS[node.feedbackTemperature] || TEMPERATURE_COLORS.cold
-    : null;
+  const isClickable = !!(onClick) && !(node.isMystery && !node.isRevealed);
 
-  let chipSx = {
+  const chipSx = {
     position: 'absolute',
     left: position.x,
     top: position.y,
     transform: `translate(-50%, -50%) ${mounted || !isNew ? '' : 'translateY(-20px)'}`,
     opacity: mounted || !isNew ? 1 : 0,
     transition: 'opacity 0.3s ease, transform 0.3s ease',
-    maxWidth: MIN_NODE_WIDTH + 40,
-    cursor: 'default',
+    maxWidth: MIN_NODE_WIDTH + 60,
+    cursor: isClickable ? 'pointer' : 'default',
     zIndex: 1,
   };
 
+  // ── Aves root ──
   if (isRoot) {
     return (
-      <Box sx={chipSx}>
+      <Box sx={chipSx} onClick={isClickable ? () => onClick(node) : undefined}>
         <Chip
-          label="Aves (Class)"
+          label="Aves · class"
           color="primary"
           size="small"
           sx={{ fontWeight: 700, fontSize: '11px' }}
@@ -114,46 +199,47 @@ function TreeNode({ node, position, isNew }) {
     );
   }
 
+  // ── Mystery / revealed answer ──
   if (node.isMystery) {
     const revealed = node.isRevealed;
     return (
-      <Box sx={{ ...chipSx, textAlign: 'center' }}>
+      <Box
+        sx={{ ...chipSx, textAlign: 'center' }}
+        onClick={revealed && isClickable ? () => onClick(node) : undefined}
+      >
         <Chip
-          label={revealed ? (node.commonName || node.name) : '?'}
+          label={
+            revealed
+              ? <span style={{ fontWeight: 700, fontSize: '11px' }}>{node.commonName || node.name}</span>
+              : <span style={{ fontWeight: 700, fontSize: '13px', letterSpacing: 1 }}>?</span>
+          }
           size="small"
           sx={{
             bgcolor: revealed ? TEMPERATURE_COLORS.correct : 'transparent',
             color: revealed ? '#fff' : 'text.primary',
             fontWeight: 700,
-            fontSize: '11px',
             border: '2px dashed',
             borderColor: revealed ? TEMPERATURE_COLORS.correct : 'primary.main',
+            height: 'auto',
+            '& .MuiChip-label': { py: 0.5, px: 1 },
           }}
           aria-label={revealed ? `Answer: ${node.commonName}` : 'Mystery Bird'}
         />
         <Typography
           variant="caption"
-          sx={{
-            display: 'block',
-            fontSize: '9px',
-            color: 'text.disabled',
-            mt: 0.25,
-            position: 'absolute',
-            width: '100%',
-            left: 0,
-            textAlign: 'center',
-            top: '100%',
-          }}
+          sx={{ display: 'block', fontSize: '9px', color: 'text.disabled', mt: 0.25, textAlign: 'center' }}
         >
-          mystery
+          {revealed ? 'answer' : 'mystery'}
         </Typography>
       </Box>
     );
   }
 
+  // ── Guess leaf ──
   if (isLeaf) {
+    const color = TEMPERATURE_COLORS[node.feedbackTemperature] || TEMPERATURE_COLORS.cold;
     return (
-      <Box sx={chipSx}>
+      <Box sx={chipSx} onClick={isClickable ? () => onClick(node) : undefined}>
         <Chip
           label={node.commonName || node.name}
           size="small"
@@ -162,7 +248,7 @@ function TreeNode({ node, position, isNew }) {
             color: '#fff',
             fontWeight: 600,
             fontSize: '11px',
-            maxWidth: MIN_NODE_WIDTH + 40,
+            maxWidth: MIN_NODE_WIDTH + 60,
           }}
           aria-label={`Guessed bird: ${node.commonName || node.name}`}
         />
@@ -170,37 +256,40 @@ function TreeNode({ node, position, isNew }) {
     );
   }
 
-  // Internal node (LCA or ancestor)
+  // ── Internal node: LCA or hint ──
+  const isHint = node.isHint;
   return (
-    <Box sx={{ ...chipSx, textAlign: 'center' }}>
+    <Box sx={chipSx} onClick={isClickable ? () => onClick(node) : undefined}>
       <Chip
-        label={node.name}
+        label={
+          <span>
+            <span style={{ display: 'block', fontWeight: 700, fontSize: '11px', lineHeight: 1.3 }}>
+              {node.name}
+            </span>
+            {node.rank && node.rank !== 'unknown' && (
+              <span style={{ display: 'block', fontSize: '9px', opacity: 0.75, lineHeight: 1.2 }}>
+                {node.rank}
+              </span>
+            )}
+          </span>
+        }
         variant="outlined"
         size="small"
-        sx={{ fontSize: '11px', bgcolor: 'background.paper', maxWidth: MIN_NODE_WIDTH + 40 }}
+        sx={{
+          bgcolor: 'background.paper',
+          maxWidth: MIN_NODE_WIDTH + 60,
+          height: 'auto',
+          borderColor: isHint ? 'warning.main' : 'divider',
+          borderWidth: isHint ? 2 : 1,
+          '& .MuiChip-label': { py: 0.5, px: 1, whiteSpace: 'normal' },
+        }}
         aria-label={`${node.rank || 'taxon'}: ${node.name}`}
       />
-      {node.rank && node.rank !== 'unknown' && (
-        <Typography
-          variant="caption"
-          sx={{
-            display: 'block',
-            fontSize: '9px',
-            color: 'text.disabled',
-            mt: 0.25,
-            position: 'absolute',
-            width: '100%',
-            left: 0,
-            textAlign: 'center',
-            top: '100%',
-          }}
-        >
-          {node.rank}
-        </Typography>
-      )}
     </Box>
   );
 }
+
+// ─── PhyloTree ───────────────────────────────────────────────────────────────
 
 export default function PhyloTree() {
   const { state } = useGame();
@@ -208,25 +297,22 @@ export default function PhyloTree() {
   const containerRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [newNodeIds, setNewNodeIds] = useState(new Set());
+  const [wikiNode, setWikiNode] = useState(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
+      for (const entry of entries) setContainerWidth(entry.contentRect.width);
     });
     observer.observe(containerRef.current);
     setContainerWidth(containerRef.current.offsetWidth);
     return () => observer.disconnect();
   }, []);
 
-  // Track new nodes for animation
   const prevNodeCount = useRef(treeNodes.size);
   useEffect(() => {
     if (treeNodes.size > prevNodeCount.current) {
       const allIds = Array.from(treeNodes.keys());
-      // Mark newest nodes (those added since last render) as new
       setNewNodeIds(new Set(allIds.slice(prevNodeCount.current)));
       prevNodeCount.current = treeNodes.size;
     }
@@ -240,67 +326,70 @@ export default function PhyloTree() {
   const noGuesses = guesses.length === 0;
 
   return (
-    <Box
-      ref={containerRef}
-      sx={{
-        position: 'relative',
-        width: '100%',
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        minHeight: 160,
-        bgcolor: 'background.default',
-        borderRadius: 2,
-        border: '1px solid',
-        borderColor: 'divider',
-      }}
-      aria-label="Phylogenetic tree visualization"
-      role="img"
-    >
-      {noGuesses ? (
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: 160,
-            color: 'text.disabled',
-            px: 2,
-            textAlign: 'center',
-          }}
-        >
-          <Typography variant="body2">
-            Make your first guess to start building the tree!
-          </Typography>
-        </Box>
-      ) : (
-        <Box sx={{ position: 'relative', width: '100%', height: totalHeight }}>
-          {/* SVG layer for edges */}
+    <>
+      <Box
+        ref={containerRef}
+        sx={{
+          position: 'relative',
+          width: '100%',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          minHeight: 160,
+          bgcolor: 'background.default',
+          borderRadius: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+        }}
+        aria-label="Phylogenetic tree visualization"
+        role="img"
+      >
+        {noGuesses ? (
           <Box
-            component="svg"
             sx={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              pointerEvents: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: 160,
+              color: 'text.disabled',
+              px: 2,
+              textAlign: 'center',
             }}
-            aria-hidden="true"
           >
-            <TreeEdges treeEdges={treeEdges} positions={positions} />
+            <Typography variant="body2">
+              Make your first guess to start building the tree!
+            </Typography>
           </Box>
+        ) : (
+          <Box sx={{ position: 'relative', width: '100%', height: totalHeight }}>
+            <Box
+              component="svg"
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+              }}
+              aria-hidden="true"
+            >
+              <TreeEdges treeEdges={treeEdges} positions={positions} />
+            </Box>
 
-          {/* Node layer */}
-          {Array.from(treeNodes.entries()).map(([taxId, node]) => (
-            <TreeNode
-              key={taxId}
-              node={node}
-              position={positions[taxId]}
-              isNew={newNodeIds.has(taxId)}
-            />
-          ))}
-        </Box>
-      )}
-    </Box>
+            {Array.from(treeNodes.entries()).map(([taxId, node]) => (
+              <TreeNode
+                key={taxId}
+                node={node}
+                position={positions[taxId]}
+                isNew={newNodeIds.has(taxId)}
+                onClick={setWikiNode}
+              />
+            ))}
+          </Box>
+        )}
+      </Box>
+
+      <WikiDialog node={wikiNode} onClose={() => setWikiNode(null)} />
+    </>
   );
 }

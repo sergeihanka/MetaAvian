@@ -119,11 +119,11 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     edges.push({ parentId: leafParent, childId: leafId });
   }
 
-  // Place mystery as sibling of the leaf at the deepest (hottest) LCA
+  // Place mystery below deepest known ancestor (hint nodes or LCA nodes)
   let bestLcaTaxId = AVES_ROOT.taxId;
   let bestLcaDepth = AVES_ROOT.depth;
   for (const [, node] of nodes) {
-    if (node.isLca && (node.depth ?? 0) > bestLcaDepth) {
+    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestLcaDepth) {
       bestLcaDepth = node.depth;
       bestLcaTaxId = node.taxId;
     }
@@ -140,6 +140,50 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     parentLcaTaxId: bestLcaTaxId,
   });
   edges.push({ parentId: bestLcaTaxId, childId: 'mystery' });
+
+  return { treeNodes: nodes, treeEdges: edges };
+}
+
+/**
+ * Add a hint node to the tree and move the mystery node below it.
+ * hintIndex: 0-based index of this hint (0=order, 1=family, 2=genus)
+ * allHintNodes: the full hint array AFTER appending the new node
+ */
+function applyHintToTree(prevNodes, prevEdges, newHintNode, hintIndex, allHintNodes) {
+  const nodes = new Map(prevNodes);
+
+  // Strip old mystery edge; rebuild it at the end
+  const edges = prevEdges.filter((e) => e.childId !== 'mystery');
+  const edgeSet = new Set(edges.map((e) => `${e.parentId}->${e.childId}`));
+
+  // Add the hint node
+  nodes.set(newHintNode.taxId, { ...newHintNode, isHint: true });
+
+  // Chain: Aves → hint0 → hint1 → hint2
+  const parentId = hintIndex === 0 ? AVES_ROOT.taxId : allHintNodes[hintIndex - 1].taxId;
+  const hintEdgeKey = `${parentId}->${newHintNode.taxId}`;
+  if (!edgeSet.has(hintEdgeKey)) {
+    edgeSet.add(hintEdgeKey);
+    edges.push({ parentId, childId: newHintNode.taxId });
+  }
+
+  // Move mystery below the deepest known ancestor (hint or LCA)
+  let bestParentId = AVES_ROOT.taxId;
+  let bestParentDepth = AVES_ROOT.depth;
+  for (const [, node] of nodes) {
+    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestParentDepth) {
+      bestParentDepth = node.depth;
+      bestParentId = node.taxId;
+    }
+  }
+
+  const existingMystery = nodes.get('mystery') || {};
+  nodes.set('mystery', {
+    ...existingMystery,
+    depth: bestParentDepth + 1,
+    parentLcaTaxId: bestParentId,
+  });
+  edges.push({ parentId: bestParentId, childId: 'mystery' });
 
   return { treeNodes: nodes, treeEdges: edges };
 }
@@ -162,6 +206,9 @@ const initialState = {
   treeEdges: [],
 
   birdList: [],
+
+  hintsUsed: 0,
+  hintNodes: [],
 
   user: null,
   token: null,
@@ -220,6 +267,8 @@ function reducer(state, action) {
         treeNodes: restoredNodes,
         treeEdges: saved.treeEdges || [],
         showResults: saved.phase === 'won' || saved.phase === 'lost',
+        hintsUsed: saved.hintsUsed || 0,
+        hintNodes: saved.hintNodes || [],
       };
     }
 
@@ -263,6 +312,22 @@ function reducer(state, action) {
         treeEdges,
         showResults,
         error: null,
+      };
+    }
+
+    case 'REVEAL_HINT': {
+      const { hintNode, hintIndex, cost } = action.payload;
+      const newHintNodes = [...state.hintNodes, hintNode];
+      const { treeNodes, treeEdges } = applyHintToTree(
+        state.treeNodes, state.treeEdges, hintNode, hintIndex, newHintNodes
+      );
+      return {
+        ...state,
+        hintsUsed: hintIndex + 1,
+        hintNodes: newHintNodes,
+        guessesRemaining: state.guessesRemaining - cost,
+        treeNodes,
+        treeEdges,
       };
     }
 
@@ -318,9 +383,10 @@ function persistGameState(state) {
     guesses: state.guesses,
     guessesRemaining: state.guessesRemaining,
     phase: state.phase,
-    // Serialize Map to plain object for JSON
     treeNodes: Object.fromEntries(state.treeNodes),
     treeEdges: state.treeEdges,
+    hintsUsed: state.hintsUsed,
+    hintNodes: state.hintNodes,
   };
   try {
     localStorage.setItem(key, JSON.stringify(toSave));

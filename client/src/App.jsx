@@ -14,6 +14,7 @@ import { BIRD_LIST_KEY, BIRD_LIST_DATE_KEY, TOKEN_KEY } from './config.js';
 
 import TopNav from './components/TopNav.jsx';
 import GuessInput from './components/GuessInput.jsx';
+import HintBar from './components/HintBar.jsx';
 import PhyloTree from './components/PhyloTree.jsx';
 import GuessHistoryList from './components/GuessHistoryList.jsx';
 import ResultsModal from './components/ResultsModal.jsx';
@@ -64,6 +65,9 @@ function GameScreen() {
     >
       {/* Guess Input */}
       <GuessInput />
+
+      {/* Hint Bar */}
+      <HintBar />
 
       {/* Phylogenetic Tree */}
       <PhyloTree />
