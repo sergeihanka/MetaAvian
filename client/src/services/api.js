@@ -37,7 +37,7 @@ export function searchBirds(q) {
 }
 
 export function submitGuess({ puzzleDate, birdCommonName }) {
-  return request('POST', '/guess', { puzzleDate, birdCommonName });
+  return request('POST', '/puzzle/guess', { puzzleDate, birdCommonName });
 }
 
 export function getPuzzleResult(date) {
