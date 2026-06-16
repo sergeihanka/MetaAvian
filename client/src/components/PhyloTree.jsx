@@ -134,8 +134,9 @@ function WikiDialog({ node, onClose }) {
                 alt={data.title}
                 sx={{
                   width: '100%',
-                  maxHeight: 220,
-                  objectFit: 'cover',
+                  height: 'auto',
+                  maxHeight: 280,
+                  objectFit: 'contain',
                   borderRadius: 2,
                   mb: 1.5,
                   display: 'block',
