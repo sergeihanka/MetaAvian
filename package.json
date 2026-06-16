@@ -4,7 +4,7 @@
   "description": "Aviary — Daily Bird Taxonomy Guessing Game",
   "type": "module",
   "engines": {
-    "node": ">=20.x",
+    "node": "24.x",
     "npm": ">=10.x"
   },
   "main": "server.js",
@@ -12,7 +12,7 @@
     "start": "node server.js",
     "dev": "concurrently \"nodemon server.js\" \"npm run client:dev\"",
     "client:dev": "cd client && npm run dev",
-    "build": "cd client && npm install && npm run build",
+    "build": "cd client && npm install --include=dev && npm run build",
     "heroku-postbuild": "npm run build",
     "seed:birds": "node scripts/seed-birds.js",
     "seed:puzzles": "node scripts/seed-puzzles.js"
