@@ -3,6 +3,7 @@ import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
+import Box from '@mui/material/Box';
 import SettingsIcon from '@mui/icons-material/Settings';
 import PersonIcon from '@mui/icons-material/Person';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
@@ -31,13 +32,28 @@ export default function TopNav() {
           <SettingsIcon />
         </IconButton>
 
-        <Typography
-          variant="h6"
-          component="h1"
-          sx={{ fontWeight: 700, letterSpacing: 2, userSelect: 'none' }}
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', gap: 1, userSelect: 'none' }}
+          onClick={() => dispatch({ type: 'TOGGLE_ABOUT' })}
+          style={{ cursor: 'pointer' }}
+          role="button"
+          aria-label="About Aviary"
         >
-          AVIARY 🪽
-        </Typography>
+          <Box
+            component="img"
+            src="/icons/icon-192.png"
+            alt=""
+            aria-hidden="true"
+            sx={{ width: 32, height: 32, borderRadius: '8px' }}
+          />
+          <Typography
+            variant="h6"
+            component="h1"
+            sx={{ fontWeight: 700, letterSpacing: 2, color: 'primary.main' }}
+          >
+            AVIARY
+          </Typography>
+        </Box>
 
         <Toolbar component="div" disableGutters sx={{ gap: 0.5, p: 0 }}>
           <IconButton

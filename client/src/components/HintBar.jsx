@@ -86,15 +86,23 @@ export default function HintBar() {
                   borderRadius: 2,
                   ...(used
                     ? {
-                        bgcolor: 'warning.main',
-                        borderColor: 'warning.main',
+                        bgcolor: '#169A43',
+                        borderColor: '#169A43',
                         color: '#fff',
-                        '&:hover': { bgcolor: 'warning.dark' },
+                        '&:hover': { bgcolor: '#0F6D3D' },
                       }
                     : available
-                      ? { borderColor: 'warning.main', color: 'warning.dark' }
-                      : {}),
-                  '&.Mui-disabled': { opacity: 0.45 },
+                      ? {
+                          borderColor: '#1495D7',
+                          color: '#1495D7',
+                          bgcolor: '#EAF6FD',
+                          '&:hover': { bgcolor: '#9FD3F2', borderColor: '#1495D7' },
+                        }
+                      : {
+                          borderColor: 'divider',
+                          color: 'text.disabled',
+                        }),
+                  '&.Mui-disabled': { opacity: 0.55 },
                 }}
               >
                 {used && revealed ? (

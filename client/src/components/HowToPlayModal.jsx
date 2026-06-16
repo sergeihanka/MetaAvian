@@ -67,7 +67,7 @@ export default function HowToPlayModal() {
       <DialogContent sx={{ pb: 4 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Typography variant="body1">
-            Guess the daily <strong>Mystery Bird</strong> in 20 tries.
+            Guess the daily <strong>Mystery Bird</strong> in 25 tries.
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Each guess must be a valid bird from the list. After each wrong

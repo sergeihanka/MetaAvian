@@ -1,6 +1,5 @@
 import React from 'react';
 import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
@@ -40,24 +39,48 @@ export default function AboutScreen() {
         '& .MuiDialog-container': { alignItems: 'flex-end' },
       }}
     >
-      <DialogTitle
-        id="about-title"
-        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}
-      >
-        <Typography variant="h6" component="span" sx={{ fontWeight: 700 }}>
-          About Aviary
-        </Typography>
-        <IconButton
-          aria-label="Close about"
-          onClick={handleClose}
-          sx={{ minHeight: 44, minWidth: 44 }}
-        >
-          <CloseIcon />
-        </IconButton>
-      </DialogTitle>
-
       <DialogContent sx={{ pb: 4 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {/* Branding header */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              pt: 1,
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box
+                component="img"
+                src="/icons/icon-192.png"
+                alt="Aviary logo"
+                sx={{ width: 48, height: 48, borderRadius: '12px' }}
+              />
+              <Box>
+                <Typography
+                  id="about-title"
+                  variant="h6"
+                  sx={{ fontWeight: 700, letterSpacing: 2, color: 'primary.main', lineHeight: 1.2 }}
+                >
+                  AVIARY
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Daily Bird Taxonomy Game
+                </Typography>
+              </Box>
+            </Box>
+            <IconButton
+              aria-label="Close about"
+              onClick={handleClose}
+              sx={{ minHeight: 44, minWidth: 44 }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+
+          <Divider />
+
           <Typography variant="body1">
             Aviary is a daily bird taxonomy guessing game. Each day, one Mystery
             Bird is chosen. Guess bird names and discover where they fall in the
@@ -83,8 +106,7 @@ export default function AboutScreen() {
               >
                 NCBI Taxonomy
               </Typography>{' '}
-              (National Center for Biotechnology Information), publicly
-              available.
+              (National Center for Biotechnology Information), publicly available.
             </Typography>
           </Box>
 
@@ -114,28 +136,8 @@ export default function AboutScreen() {
                 color="primary"
               >
                 Metazooa
-              </Typography>{' '}
-              (Trainwreck Labs).
-            </Typography>
-          </Box>
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              Technology
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              UI built with{' '}
-              <Typography
-                component="a"
-                href="https://mui.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                variant="body2"
-                color="primary"
-              >
-                Material-UI
-              </Typography>{' '}
-              (MIT License).
+              </Typography>
+              .
             </Typography>
           </Box>
 
@@ -159,11 +161,11 @@ export default function AboutScreen() {
             Feedback &amp; questions:{' '}
             <Typography
               component="a"
-              href="mailto:sergeiahanka@gmail.com"
+              href="mailto:admin@metaavian.com"
               variant="body2"
               color="primary"
             >
-              sergeiahanka@gmail.com
+              admin@metaavian.com
             </Typography>
           </Typography>
         </Box>

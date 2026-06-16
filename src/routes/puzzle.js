@@ -64,7 +64,7 @@ router.get('/today', async (req, res) => {
 
   res.json({
     puzzleNumber: puzzle.puzzleNumber,
-    guessLimit: 20,
+    guessLimit: 25,
     date: puzzle.dateUtc,
   });
 });

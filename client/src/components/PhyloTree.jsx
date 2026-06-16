@@ -279,7 +279,7 @@ function TreeNode({ node, position, isNew, onClick }) {
           bgcolor: 'background.paper',
           maxWidth: MIN_NODE_WIDTH + 60,
           height: 'auto',
-          borderColor: isHint ? 'warning.main' : 'divider',
+          borderColor: isHint ? '#169A43' : 'divider',
           borderWidth: isHint ? 2 : 1,
           '& .MuiChip-label': { py: 0.5, px: 1, whiteSpace: 'normal' },
         }}
