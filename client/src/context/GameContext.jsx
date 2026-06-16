@@ -36,94 +36,110 @@ const AVES_ROOT = { taxId: 8782, name: 'Aves', rank: 'class', depth: 0 };
 // ────────────────────────────────────────────────────────────
 
 /**
- * Build updated treeNodes Map and treeEdges array from a new guess result.
- * The API returns:
- *   guessResult.lca          = { taxId, name, rank, depth }
- *   guessResult.ancestorPath = [taxId, ...] — from root to guessed-species leaf
- *   guessResult.commonName   = guessed bird common name (leaf label)
+ * Build updated treeNodes Map and treeEdges array from a normalized guess.
+ * Only shows: Aves root, LCA node(s), guess leaves, and mystery "?" node.
+ * Mystery is placed as sibling of the leaf at the deepest (hottest) LCA.
+ *
+ * Normalized guess shape:
+ *   { commonName, feedbackTemperature, lca: { taxId, name, rank, depth }, correct, answer }
  */
-function buildTreeUpdate(prevNodes, prevEdges, guessResult) {
+function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
   const nodes = new Map(prevNodes);
-  const edgeSet = new Set(prevEdges.map((e) => `${e.parentId}->${e.childId}`));
-  const edges = [...prevEdges];
 
-  // Ensure Aves root is present
   if (!nodes.has(AVES_ROOT.taxId)) {
     nodes.set(AVES_ROOT.taxId, { ...AVES_ROOT });
   }
 
-  const { lca, ancestorPath, commonName, feedbackTemperature } = guessResult;
-
-  // Add LCA node if present
-  if (lca && lca.taxId) {
-    if (!nodes.has(lca.taxId)) {
-      nodes.set(lca.taxId, {
-        taxId: lca.taxId,
-        name: lca.name,
-        rank: lca.rank,
-        depth: lca.depth,
-      });
+  // Copy all non-mystery edges (mystery edge is always rebuilt from scratch)
+  const edgeSet = new Set();
+  const edges = [];
+  for (const e of prevEdges) {
+    if (e.childId === 'mystery') continue;
+    const key = `${e.parentId}->${e.childId}`;
+    if (!edgeSet.has(key)) {
+      edgeSet.add(key);
+      edges.push(e);
     }
   }
 
-  // Walk ancestorPath and add all ancestor nodes + edges
-  if (ancestorPath && ancestorPath.length > 0) {
-    // ancestorPath is ordered from root (index 0) to leaf (last index)
-    // The leaf is the guessed species; nodes before it are ancestors
-    for (let i = 0; i < ancestorPath.length; i++) {
-      const taxId = ancestorPath[i];
-      if (!nodes.has(taxId)) {
-        // We may not have full info for intermediate nodes — use partial data
-        // The API should have returned node info in some form; we use what we know
-        const isLca = lca && lca.taxId === taxId;
-        nodes.set(taxId, {
-          taxId,
-          name: isLca ? lca.name : String(taxId),
-          rank: isLca ? lca.rank : 'unknown',
-          depth: isLca ? lca.depth : i,
-        });
-      }
+  // Correct guess — reveal the mystery node in place
+  if (normalizedGuess.correct) {
+    const existing = nodes.get('mystery') || {};
+    const revealedName = normalizedGuess.answer?.commonName || normalizedGuess.commonName;
+    nodes.set('mystery', {
+      ...existing,
+      name: revealedName,
+      commonName: revealedName,
+      feedbackTemperature: 'correct',
+      isRevealed: true,
+      isMystery: true,
+      isLeaf: true,
+    });
+    const mysteryParent = existing.parentLcaTaxId || AVES_ROOT.taxId;
+    edges.push({ parentId: mysteryParent, childId: 'mystery' });
+    return { treeNodes: nodes, treeEdges: edges };
+  }
 
-      if (i > 0) {
-        const parentId = ancestorPath[i - 1];
-        const key = `${parentId}->${taxId}`;
-        if (!edgeSet.has(key)) {
-          edgeSet.add(key);
-          edges.push({ parentId, childId: taxId });
-        }
-      }
-    }
+  const { lca, feedbackTemperature, commonName } = normalizedGuess;
+  const lcaTaxId = lca?.taxId;
+  const lcaDepth = lca?.depth ?? 1;
 
-    // Leaf node — add it with guess metadata
-    const leafTaxId =
-      guessResult.guessTaxId ||
-      (ancestorPath.length > 0 ? `leaf_${guessResult.commonName}` : null);
-
-    if (leafTaxId) {
-      const leafDepth =
-        lca && lca.depth != null ? lca.depth + 1 : ancestorPath.length;
-      nodes.set(leafTaxId, {
-        taxId: leafTaxId,
-        name: commonName,
-        rank: 'species',
-        depth: leafDepth,
-        isLeaf: true,
-        feedbackTemperature,
-        commonName,
-      });
-
-      // Connect leaf to its parent (last node in ancestorPath before leaf)
-      const parentOfLeaf =
-        ancestorPath.length > 0
-          ? ancestorPath[ancestorPath.length - 1]
-          : AVES_ROOT.taxId;
-      const leafEdgeKey = `${parentOfLeaf}->${leafTaxId}`;
-      if (!edgeSet.has(leafEdgeKey)) {
-        edgeSet.add(leafEdgeKey);
-        edges.push({ parentId: parentOfLeaf, childId: leafTaxId });
-      }
+  // Add LCA node (skip if it IS the Aves root)
+  if (lcaTaxId && lcaTaxId !== AVES_ROOT.taxId) {
+    nodes.set(lcaTaxId, {
+      taxId: lcaTaxId,
+      name: lca.name,
+      rank: lca.rank,
+      depth: lcaDepth,
+      isLca: true,
+    });
+    const k = `${AVES_ROOT.taxId}->${lcaTaxId}`;
+    if (!edgeSet.has(k)) {
+      edgeSet.add(k);
+      edges.push({ parentId: AVES_ROOT.taxId, childId: lcaTaxId });
     }
   }
+
+  // Add guess leaf
+  const leafParent = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
+  const leafId = `leaf_${commonName}`;
+  nodes.set(leafId, {
+    taxId: leafId,
+    name: commonName,
+    commonName,
+    rank: 'species',
+    depth: lcaDepth + 1,
+    isLeaf: true,
+    feedbackTemperature,
+    parentLcaTaxId: leafParent,
+  });
+  const leafKey = `${leafParent}->${leafId}`;
+  if (!edgeSet.has(leafKey)) {
+    edgeSet.add(leafKey);
+    edges.push({ parentId: leafParent, childId: leafId });
+  }
+
+  // Place mystery as sibling of the leaf at the deepest (hottest) LCA
+  let bestLcaTaxId = AVES_ROOT.taxId;
+  let bestLcaDepth = AVES_ROOT.depth;
+  for (const [, node] of nodes) {
+    if (node.isLca && (node.depth ?? 0) > bestLcaDepth) {
+      bestLcaDepth = node.depth;
+      bestLcaTaxId = node.taxId;
+    }
+  }
+
+  nodes.set('mystery', {
+    taxId: 'mystery',
+    name: '?',
+    commonName: 'Mystery Bird',
+    rank: 'species',
+    depth: bestLcaDepth + 1,
+    isLeaf: true,
+    isMystery: true,
+    parentLcaTaxId: bestLcaTaxId,
+  });
+  edges.push({ parentId: bestLcaTaxId, childId: 'mystery' });
 
   return { treeNodes: nodes, treeEdges: edges };
 }
@@ -208,7 +224,16 @@ function reducer(state, action) {
     }
 
     case 'SUBMIT_GUESS': {
-      const guess = action.payload;
+      const payload = action.payload;
+      // Normalize API response: flatten guess.guess.commonName → guess.commonName
+      const guess = {
+        commonName: payload.guess?.commonName || '',
+        feedbackTemperature: payload.feedbackTemperature || (payload.correct ? 'correct' : 'cold'),
+        lca: payload.lca || null,
+        correct: payload.correct || false,
+        answer: payload.answer || null,
+      };
+
       const newGuesses = [...state.guesses, guess];
       const newGuessesRemaining = state.guessesRemaining - 1;
 
@@ -221,7 +246,7 @@ function reducer(state, action) {
       let phase = 'playing';
       let showResults = state.showResults;
 
-      if (guess.feedbackTemperature === 'correct') {
+      if (guess.correct || guess.feedbackTemperature === 'correct') {
         phase = 'won';
         showResults = true;
       } else if (newGuessesRemaining <= 0) {

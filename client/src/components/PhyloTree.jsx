@@ -12,31 +12,35 @@ const NODE_HEIGHT = 36;
 function computeLayout(treeNodes, treeEdges, containerWidth) {
   if (!containerWidth || treeNodes.size === 0) return { positions: {}, totalHeight: ROW_HEIGHT };
 
-  // Group nodes by depth
-  const byDepth = new Map();
+  // NCBI depths can be large (up to 20+). Compress to display rows by sorting
+  // unique actual depths and mapping them to sequential row indices.
+  const depthSet = new Set();
+  for (const [, node] of treeNodes) depthSet.add(node.depth ?? 0);
+  const sortedDepths = Array.from(depthSet).sort((a, b) => a - b);
+  const depthToRow = new Map(sortedDepths.map((d, i) => [d, i]));
+
+  // Group nodes by display row
+  const byRow = new Map();
   for (const [taxId, node] of treeNodes) {
-    const depth = node.depth ?? 0;
-    if (!byDepth.has(depth)) byDepth.set(depth, []);
-    byDepth.get(depth).push({ taxId, ...node });
+    const row = depthToRow.get(node.depth ?? 0) ?? 0;
+    if (!byRow.has(row)) byRow.set(row, []);
+    byRow.get(row).push({ taxId, ...node });
   }
 
   const positions = {};
-  const sortedDepths = Array.from(byDepth.keys()).sort((a, b) => a - b);
-  const maxDepth = sortedDepths[sortedDepths.length - 1] ?? 0;
-
-  for (const depth of sortedDepths) {
-    const nodesAtDepth = byDepth.get(depth);
-    nodesAtDepth.forEach((node, idx) => {
+  for (const [row, rowNodes] of byRow) {
+    rowNodes.forEach((node, idx) => {
       const x =
-        nodesAtDepth.length === 1
+        rowNodes.length === 1
           ? containerWidth / 2
-          : ((idx + 1) / (nodesAtDepth.length + 1)) * containerWidth;
-      const y = depth * ROW_HEIGHT + ROW_HEIGHT / 2;
+          : ((idx + 1) / (rowNodes.length + 1)) * containerWidth;
+      const y = row * ROW_HEIGHT + ROW_HEIGHT / 2;
       positions[node.taxId] = { x, y };
     });
   }
 
-  const totalHeight = (maxDepth + 1) * ROW_HEIGHT + ROW_HEIGHT;
+  const numRows = sortedDepths.length;
+  const totalHeight = numRows * ROW_HEIGHT + ROW_HEIGHT / 2;
   return { positions, totalHeight };
 }
 
@@ -106,6 +110,43 @@ function TreeNode({ node, position, isNew }) {
           sx={{ fontWeight: 700, fontSize: '11px' }}
           aria-label="Root node: Aves class"
         />
+      </Box>
+    );
+  }
+
+  if (node.isMystery) {
+    const revealed = node.isRevealed;
+    return (
+      <Box sx={{ ...chipSx, textAlign: 'center' }}>
+        <Chip
+          label={revealed ? (node.commonName || node.name) : '?'}
+          size="small"
+          sx={{
+            bgcolor: revealed ? TEMPERATURE_COLORS.correct : 'transparent',
+            color: revealed ? '#fff' : 'text.primary',
+            fontWeight: 700,
+            fontSize: '11px',
+            border: '2px dashed',
+            borderColor: revealed ? TEMPERATURE_COLORS.correct : 'primary.main',
+          }}
+          aria-label={revealed ? `Answer: ${node.commonName}` : 'Mystery Bird'}
+        />
+        <Typography
+          variant="caption"
+          sx={{
+            display: 'block',
+            fontSize: '9px',
+            color: 'text.disabled',
+            mt: 0.25,
+            position: 'absolute',
+            width: '100%',
+            left: 0,
+            textAlign: 'center',
+            top: '100%',
+          }}
+        >
+          mystery
+        </Typography>
       </Box>
     );
   }
