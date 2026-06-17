@@ -6,6 +6,7 @@ import { theme } from './theme.js';
 import { GameProvider } from './context/GameContext.jsx';
 import { InstallPromptProvider } from './context/InstallPromptContext.jsx';
 import App from './App.jsx';
+import { startVersionWatch } from './utils/versionCheck.js';
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   // Only reload when the SW *changes* (update), not on first install
@@ -14,6 +15,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     if (hadController) window.location.reload();
   });
   navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// Poll for new deploys and silently refresh stale clients/PWAs
+if (import.meta.env.PROD) {
+  startVersionWatch();
 }
 
 const container = document.getElementById('root');

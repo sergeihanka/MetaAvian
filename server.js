@@ -17,6 +17,8 @@ import puzzleRouter from './src/routes/puzzle.js';
 import usersRouter from './src/routes/users.js';
 import statsRouter from './src/routes/stats.js';
 import wikiRouter from './src/routes/wiki.js';
+import versionRouter from './src/routes/version.js';
+import { appVersionHeader } from './src/middleware/appVersion.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -100,6 +102,10 @@ app.get('/health', (req, res) => {
 // ---------------------------------------------------------------------------
 // API routes
 // ---------------------------------------------------------------------------
+// Stamp every API response with the deployed version so clients auto-update
+app.use('/api', appVersionHeader);
+
+app.use('/api/v1/version', versionRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/birds', birdsRouter);
 app.use('/api/v1/puzzle', puzzleRouter);

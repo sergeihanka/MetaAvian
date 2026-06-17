@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -9,7 +9,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
 import { useGame, getPuzzleDate, loadGameState } from './context/GameContext.jsx';
-import { getPuzzleToday, getBirds } from './services/api.js';
+import { getPuzzleToday, getBirds, saveGameSession, getOrCreateGuestId } from './services/api.js';
 import { BIRD_LIST_KEY, BIRD_LIST_DATE_KEY, TOKEN_KEY } from './config.js';
 
 import TopNav from './components/TopNav.jsx';
@@ -127,6 +127,43 @@ function GameScreen() {
 export default function App() {
   const { state, dispatch } = useGame();
   const { phase, error } = state;
+
+  // Persist completed games to aviary.gamesessions. Re-runs (and re-verifies)
+  // if the user logs in after finishing, so the session is attached to their
+  // account. The server upserts, so reloads/replays never create duplicates.
+  const lastSavedRef = useRef('');
+  useEffect(() => {
+    if (phase !== 'won' && phase !== 'lost') return;
+    if (!state.puzzleDate) return;
+
+    const signature = `${state.puzzleDate}|${phase}|${state.user?.id || 'guest'}`;
+    if (lastSavedRef.current === signature) return;
+    lastSavedRef.current = signature;
+
+    saveGameSession({
+      puzzleDate: state.puzzleDate,
+      won: phase === 'won',
+      guessCount: state.guesses.length,
+      guesses: state.guesses.map((g, i) => ({
+        commonName: g.commonName,
+        lcaTaxId: g.lca?.taxId ?? null,
+        lcaName: g.lca?.name ?? null,
+        guessNumber: i + 1,
+      })),
+      guestId: getOrCreateGuestId(),
+    })
+      .then((res) => {
+        // If logged in, confirm the session was attached to the user account
+        if (state.user?.id && !res?.userId) {
+          // eslint-disable-next-line no-console
+          console.warn('Game session saved but not linked to user account.');
+        }
+      })
+      .catch(() => {
+        // Allow a retry on the next render / visit
+        lastSavedRef.current = '';
+      });
+  }, [phase, state.puzzleDate, state.user, state.guesses]);
 
   useEffect(() => {
     async function initialize() {
