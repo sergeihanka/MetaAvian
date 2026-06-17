@@ -128,20 +128,19 @@ function WikiDialog({ node, onClose }) {
         {status === 'ok' && data && (
           <>
             {data.thumbnail?.source && (
-              <Box
-                component="img"
-                src={data.thumbnail.source}
-                alt={data.title}
-                sx={{
-                  width: '100%',
-                  height: 'auto',
-                  maxHeight: 280,
-                  objectFit: 'contain',
-                  borderRadius: 2,
-                  mb: 1.5,
-                  display: 'block',
-                }}
-              />
+              <Box sx={{ width: '100%', height: 220, borderRadius: 2, mb: 1.5, overflow: 'hidden' }}>
+                <Box
+                  component="img"
+                  src={data.thumbnail.source}
+                  alt={data.title}
+                  sx={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                />
+              </Box>
             )}
             {data.description && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
