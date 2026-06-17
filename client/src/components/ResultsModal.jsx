@@ -40,7 +40,7 @@ export default function ResultsModal() {
     const puzzleLabel = puzzleNumber ? `Puzzle #${puzzleNumber}` : 'Daily Puzzle';
     const resultLine =
       phase === 'won' ? `${guessCount}/${guessLimit}` : `X/${guessLimit}`;
-    return `Aviary 🪽 ${puzzleLabel}\n${resultLine}\n${emojiRow}\n\nhttps://aviary.app`;
+    return `MetaAvian 🪽 ${puzzleLabel}\n${resultLine}\n${emojiRow}\n\nhttps://MetaAvian.com`;
   };
 
   const handleShare = async () => {
