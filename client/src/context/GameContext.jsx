@@ -25,8 +25,8 @@ function getPuzzleDate() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
 }
 
-function getGameStateKey(date) {
-  return `${GAME_STATE_KEY_PREFIX}${date}`;
+function getGameStateKey(date, resetCount) {
+  return `${GAME_STATE_KEY_PREFIX}${date}_r${resetCount ?? 0}`;
 }
 
 // NCBI Aves root
@@ -196,6 +196,7 @@ function applyHintToTree(prevNodes, prevEdges, newHintNode, hintIndex, allHintNo
 const initialState = {
   puzzleDate: null,
   puzzleNumber: null,
+  resetCount: 0,
   guessLimit: GUESS_LIMIT,
 
   phase: 'loading',
@@ -238,6 +239,7 @@ function reducer(state, action) {
         ...state,
         puzzleDate: action.payload.puzzleDate,
         puzzleNumber: action.payload.puzzleNumber,
+        resetCount: action.payload.resetCount ?? 0,
         guessLimit: action.payload.guessLimit || GUESS_LIMIT,
         guessesRemaining: action.payload.guessLimit || GUESS_LIMIT,
         phase: 'idle',
@@ -379,7 +381,7 @@ function reducer(state, action) {
 
 function persistGameState(state) {
   if (!state.puzzleDate) return;
-  const key = getGameStateKey(state.puzzleDate);
+  const key = getGameStateKey(state.puzzleDate, state.resetCount);
   const toSave = {
     guesses: state.guesses,
     guessesRemaining: state.guessesRemaining,
@@ -396,9 +398,9 @@ function persistGameState(state) {
   }
 }
 
-function loadGameState(date) {
+function loadGameState(date, resetCount) {
   try {
-    const raw = localStorage.getItem(getGameStateKey(date));
+    const raw = localStorage.getItem(getGameStateKey(date, resetCount));
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;

@@ -143,17 +143,19 @@ export default function App() {
         // 1. Load puzzle for today
         const puzzle = await getPuzzleToday();
         const puzzleDate = puzzle.date || puzzle.puzzleDate;
+        const resetCount = puzzle.resetCount ?? 0;
         dispatch({
           type: 'INIT_PUZZLE',
           payload: {
             puzzleDate,
             puzzleNumber: puzzle.puzzleNumber || puzzle.number,
             guessLimit: puzzle.guessLimit || 20,
+            resetCount,
           },
         });
 
         // 2. Restore saved game state for today
-        const savedState = loadGameState(puzzleDate);
+        const savedState = loadGameState(puzzleDate, resetCount);
         if (savedState && savedState.guesses && savedState.guesses.length > 0) {
           dispatch({ type: 'RESTORE_GAME_STATE', payload: savedState });
         }

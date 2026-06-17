@@ -5,6 +5,7 @@ const dailyPuzzleSchema = new mongoose.Schema({
   birdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bird', required: true },
   puzzleNumber: { type: Number, required: true },
   isActive: { type: Boolean, default: true },
+  resetCount: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
 });
 

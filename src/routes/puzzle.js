@@ -5,6 +5,7 @@ import DailyPuzzle from '../models/DailyPuzzle.js';
 import TaxonomyNode from '../models/TaxonomyNode.js';
 import { computeGuessResult } from '../services/lca.js';
 import { guessLimiter } from '../middleware/rateLimiter.js';
+import config from '../config/index.js';
 
 const router = Router();
 const cache = new NodeCache();
@@ -61,16 +62,19 @@ function secondsUntilNextPuzzle() {
  */
 async function getTodayPuzzle() {
   const dateStr = getPuzzleDate();
-  const cacheKey = `puzzle_${dateStr}`;
 
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
+  // First pass: find the puzzle to get its resetCount for the cache key
   const puzzle = await DailyPuzzle.findOne({ dateUtc: dateStr, isActive: true })
     .populate('birdId')
     .lean();
 
   if (!puzzle) return null;
+
+  const resetCount = puzzle.resetCount ?? 0;
+  const cacheKey = `puzzle_${dateStr}_r${resetCount}`;
+
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
 
   const ttl = secondsUntilNextPuzzle();
   cache.set(cacheKey, puzzle, ttl);
@@ -94,6 +98,7 @@ router.get('/today', async (req, res) => {
     puzzleNumber: puzzle.puzzleNumber,
     guessLimit: 25,
     date: puzzle.dateUtc,
+    resetCount: puzzle.resetCount ?? 0,
   });
 });
 
@@ -276,6 +281,42 @@ router.get('/result', async (req, res) => {
       ancestorNames: bird.ancestorNames,
       ancestorRanks: bird.ancestorRanks,
     },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/puzzle/reset-today
+// Increments resetCount so all clients treat today as a fresh puzzle.
+// Requires Authorization: Bearer <ADMIN_SECRET>
+// ---------------------------------------------------------------------------
+
+router.post('/reset-today', async (req, res) => {
+  const secret = config.adminSecret;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: 'Unauthorized.' });
+  }
+
+  const dateStr = getPuzzleDate();
+
+  const puzzle = await DailyPuzzle.findOneAndUpdate(
+    { dateUtc: dateStr },
+    { $inc: { resetCount: 1 } },
+    { new: true }
+  );
+
+  if (!puzzle) {
+    return res.status(404).json({ error: `No puzzle found for ${dateStr}.` });
+  }
+
+  // Bust every cached entry for today regardless of previous resetCount
+  cache.keys().forEach((k) => {
+    if (k.startsWith(`puzzle_${dateStr}`)) cache.del(k);
+  });
+
+  res.json({
+    message: `Puzzle for ${dateStr} reset. resetCount is now ${puzzle.resetCount}.`,
+    date: dateStr,
+    resetCount: puzzle.resetCount,
   });
 });
 
