@@ -1,6 +1,6 @@
 {
   "name": "meta-avian",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Aviary — Daily Bird Taxonomy Guessing Game",
   "type": "module",
   "engines": {
