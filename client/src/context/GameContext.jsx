@@ -20,8 +20,9 @@ function parseJwt(token) {
   }
 }
 
-function getTodayUtc() {
-  return new Date().toISOString().split('T')[0];
+function getPuzzleDate() {
+  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
 }
 
 function getGameStateKey(date) {
@@ -440,7 +441,7 @@ export function GameProvider({ children }) {
   }, [state.guesses, state.phase]);
 
   return (
-    <GameContext.Provider value={{ state, dispatch, loadGameState, getTodayUtc }}>
+    <GameContext.Provider value={{ state, dispatch, loadGameState, getPuzzleDate }}>
       {children}
     </GameContext.Provider>
   );
@@ -452,4 +453,4 @@ export function useGame() {
   return ctx;
 }
 
-export { getTodayUtc, loadGameState };
+export { getPuzzleDate, loadGameState };

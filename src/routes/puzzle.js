@@ -13,18 +13,46 @@ const cache = new NodeCache();
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Returns today's date in YYYY-MM-DD format (UTC). */
-function todayUtc() {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Returns the current "puzzle date" as YYYY-MM-DD.
+ * The puzzle day starts at 9:00 AM Central Time (America/Chicago).
+ * Shifting back 9 hours and reading the Central date gives a date that
+ * flips exactly at 9 AM Central, handling DST automatically.
+ */
+function getPuzzleDate() {
+  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
 }
 
-/** Seconds remaining until next midnight UTC. */
-function secondsUntilMidnightUtc() {
+/** Seconds remaining until the next puzzle releases (9:00 AM Central Time). */
+function secondsUntilNextPuzzle() {
   const now = new Date();
-  const midnight = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
-  );
-  return Math.floor((midnight - now) / 1000);
+  const hourDtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    hour: '2-digit',
+    hour12: false,
+  });
+  const dateDtf = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' });
+
+  const centralHour =
+    parseInt(Object.fromEntries(hourDtf.formatToParts(now).map(p => [p.type, p.value])).hour, 10) % 24;
+
+  const targetDateStr =
+    centralHour < 9
+      ? dateDtf.format(now)
+      : dateDtf.format(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+
+  const [ty, tm, td] = targetDateStr.split('-').map(Number);
+
+  // Try CDT (UTC−5 → 9 AM = 14:00 UTC) then CST (UTC−6 → 9 AM = 15:00 UTC)
+  for (const utcHour of [14, 15]) {
+    const candidate = new Date(Date.UTC(ty, tm - 1, td, utcHour, 0, 0, 0));
+    const cHour =
+      parseInt(Object.fromEntries(hourDtf.formatToParts(candidate).map(p => [p.type, p.value])).hour, 10) % 24;
+    if (cHour === 9) return Math.max(0, Math.floor((candidate - now) / 1000));
+  }
+
+  return Math.max(0, Math.floor((new Date(Date.UTC(ty, tm - 1, td, 15, 0, 0)) - now) / 1000));
 }
 
 /**
@@ -32,7 +60,7 @@ function secondsUntilMidnightUtc() {
  * Returns null if no puzzle is configured for today.
  */
 async function getTodayPuzzle() {
-  const dateStr = todayUtc();
+  const dateStr = getPuzzleDate();
   const cacheKey = `puzzle_${dateStr}`;
 
   const cached = cache.get(cacheKey);
@@ -44,7 +72,7 @@ async function getTodayPuzzle() {
 
   if (!puzzle) return null;
 
-  const ttl = secondsUntilMidnightUtc();
+  const ttl = secondsUntilNextPuzzle();
   cache.set(cacheKey, puzzle, ttl);
 
   return puzzle;
@@ -75,7 +103,7 @@ router.get('/today', async (req, res) => {
 
 router.post('/guess', guessLimiter, async (req, res) => {
   const { puzzleDate, birdCommonName, guessNumber } = req.body;
-  const today = todayUtc();
+  const today = getPuzzleDate();
 
   // 1. Validate puzzleDate
   if (!puzzleDate || puzzleDate !== today) {
@@ -215,7 +243,7 @@ router.get('/hint', async (req, res) => {
 
 router.get('/result', async (req, res) => {
   const { date } = req.query;
-  const today = todayUtc();
+  const today = getPuzzleDate();
 
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res.status(400).json({ error: 'A valid date parameter (YYYY-MM-DD) is required.' });

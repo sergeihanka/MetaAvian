@@ -8,7 +8,7 @@ import Button from '@mui/material/Button';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
-import { useGame, getTodayUtc, loadGameState } from './context/GameContext.jsx';
+import { useGame, getPuzzleDate, loadGameState } from './context/GameContext.jsx';
 import { getPuzzleToday, getBirds } from './services/api.js';
 import { BIRD_LIST_KEY, BIRD_LIST_DATE_KEY, TOKEN_KEY } from './config.js';
 
@@ -159,7 +159,7 @@ export default function App() {
         }
 
         // 3. Load bird list (with cache)
-        const today = getTodayUtc();
+        const today = getPuzzleDate();
         const cachedDate = localStorage.getItem(BIRD_LIST_DATE_KEY);
         const cachedList = localStorage.getItem(BIRD_LIST_KEY);
 
