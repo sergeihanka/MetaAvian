@@ -84,26 +84,43 @@ function TreeEdges({ treeEdges, positions }) {
 function WikiDialog({ node, onClose }) {
   const [status, setStatus] = useState('loading'); // loading | ok | error
   const [data, setData] = useState(null);
+  const [related, setRelated] = useState(null); // { related[], matchedOn, groupName }
+  const [customTerm, setCustomTerm] = useState(null); // set when user taps a related bird
 
+  const baseTerm = node?.name && node.name !== '?' ? node.name : node?.commonName;
+  const term = customTerm ?? baseTerm;
+
+  // Reset custom navigation whenever the underlying node changes
   useEffect(() => {
-    if (!node) return;
-    setStatus('loading');
-    setData(null);
-
-    const term = node.name && node.name !== '?' ? node.name : node.commonName;
-
-    fetch(`/api/v1/wiki?q=${encodeURIComponent(term)}`)
-      .then((r) => {
-        if (!r.ok) throw new Error('not found');
-        return r.json();
-      })
-      .then((d) => { setData(d); setStatus('ok'); })
-      .catch(() => setStatus('error'));
+    setCustomTerm(null);
+    setRelated(null);
   }, [node?.name]);
 
-  const title = node
-    ? `${node.name}${node.rank && node.rank !== 'unknown' ? ` · ${node.rank}` : ''}`
-    : '';
+  // Fetch wiki whenever term changes
+  useEffect(() => {
+    if (!term) return;
+    setStatus('loading');
+    setData(null);
+    setRelated(null);
+
+    fetch(`/api/v1/wiki?q=${encodeURIComponent(term)}`)
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((d) => { setData(d); setStatus('ok'); })
+      .catch(() => {
+        setStatus('error');
+        // Fetch related birds from aviary.allbirds via server
+        fetch(`/api/v1/wiki/related?name=${encodeURIComponent(term)}`)
+          .then((r) => r.json())
+          .then((d) => setRelated(d))
+          .catch(() => setRelated({ related: [] }));
+      });
+  }, [term]);
+
+  const displayTitle = customTerm
+    ? customTerm
+    : node
+      ? `${node.name}${node.rank && node.rank !== 'unknown' ? ` · ${node.rank}` : ''}`
+      : '';
 
   return (
     <Dialog
@@ -113,18 +130,59 @@ function WikiDialog({ node, onClose }) {
       fullWidth
       PaperProps={{ sx: { borderRadius: 3, mx: 2 } }}
     >
-      <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>{title}</DialogTitle>
+      <DialogTitle sx={{ fontWeight: 700, pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+        {customTerm && (
+          <Button
+            size="small"
+            onClick={() => { setCustomTerm(null); setRelated(null); }}
+            sx={{ minWidth: 0, p: 0.5, mr: 0.5 }}
+          >
+            ←
+          </Button>
+        )}
+        {displayTitle}
+      </DialogTitle>
+
       <DialogContent sx={{ pt: 0 }}>
         {status === 'loading' && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
             <CircularProgress size={28} />
           </Box>
         )}
+
         {status === 'error' && (
-          <Typography variant="body2" color="text.secondary">
-            No Wikipedia article found for &ldquo;{node?.name}&rdquo;.
-          </Typography>
+          <Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: related?.related?.length ? 2 : 0 }}>
+              No Wikipedia article found for &ldquo;{term}&rdquo;.
+            </Typography>
+
+            {related === null && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', pt: 1 }}>
+                <CircularProgress size={20} />
+              </Box>
+            )}
+
+            {related?.related?.length > 0 && (
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  Related birds{related.groupName ? ` · ${related.groupName}` : ''}
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                  {related.related.map((b) => (
+                    <Chip
+                      key={b.commonName}
+                      label={b.commonName}
+                      size="small"
+                      onClick={() => setCustomTerm(b.commonName)}
+                      clickable
+                    />
+                  ))}
+                </Box>
+              </Box>
+            )}
+          </Box>
         )}
+
         {status === 'ok' && data && (
           <>
             {data.thumbnail?.source && (
@@ -133,12 +191,7 @@ function WikiDialog({ node, onClose }) {
                   component="img"
                   src={data.thumbnail.source}
                   alt={data.title}
-                  sx={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    display: 'block',
-                  }}
+                  sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                 />
               </Box>
             )}
@@ -164,6 +217,7 @@ function WikiDialog({ node, onClose }) {
           </>
         )}
       </DialogContent>
+
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} size="small">Close</Button>
       </DialogActions>
