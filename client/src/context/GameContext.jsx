@@ -81,9 +81,10 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     return { treeNodes: nodes, treeEdges: edges };
   }
 
-  const { lca, feedbackTemperature, commonName, ancestorNodes } = normalizedGuess;
+  const { lca, feedbackTemperature, commonName, ancestorNodes, answerNextNode } = normalizedGuess;
   const lcaTaxId = lca?.taxId;
   const lcaDepth = lca?.depth ?? 1;
+  const lcaParentId = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
 
   // Add LCA node (skip if it IS the Aves root)
   if (lcaTaxId && lcaTaxId !== AVES_ROOT.taxId) {
@@ -104,7 +105,7 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
   // Chain intermediate taxonomy nodes (family, genus, etc.) between LCA and leaf.
   // These are specific to the guess bird's ancestry and show the user which
   // taxonomy groups their wrong guess belongs to.
-  let deepestAncestorId = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
+  let deepestAncestorId = lcaParentId;
   let deepestAncestorDepth = lcaDepth;
   if (ancestorNodes && ancestorNodes.length > 0) {
     for (const iNode of ancestorNodes) {
@@ -126,7 +127,6 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
   }
 
   // Add guess leaf — connected to deepest intermediate node (or LCA if none)
-  const leafParent = deepestAncestorId;
   const leafId = `leaf_${commonName}`;
   nodes.set(leafId, {
     taxId: leafId,
@@ -136,21 +136,47 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     depth: deepestAncestorDepth + 1,
     isLeaf: true,
     feedbackTemperature,
-    parentLcaTaxId: leafParent,
+    parentLcaTaxId: deepestAncestorId,
   });
-  const leafKey = `${leafParent}->${leafId}`;
+  const leafKey = `${deepestAncestorId}->${leafId}`;
   if (!edgeSet.has(leafKey)) {
     edgeSet.add(leafKey);
-    edges.push({ parentId: leafParent, childId: leafId });
+    edges.push({ parentId: deepestAncestorId, childId: leafId });
   }
 
-  // Place mystery below deepest known ancestor (hint nodes or LCA nodes)
-  let bestLcaTaxId = AVES_ROOT.taxId;
-  let bestLcaDepth = AVES_ROOT.depth;
+  // Add the immediate child of the LCA on the ANSWER's side.
+  // This shows "family B" when the guess was "family A" — a directional clue.
+  // Mystery bird hangs from this node; if no answerNextNode, it hangs from the LCA.
+  let mysteryParentId = lcaParentId;
+  let mysteryDepth = lcaDepth;
+  if (answerNextNode) {
+    const existing = nodes.get(answerNextNode.taxId);
+    nodes.set(answerNextNode.taxId, {
+      taxId: answerNextNode.taxId,
+      name: answerNextNode.name,
+      rank: answerNextNode.rank,
+      depth: answerNextNode.depth,
+      isAnswerBranch: true,
+      // Preserve isHint if a hint already placed this node
+      ...(existing?.isHint ? { isHint: true } : {}),
+    });
+    const aKey = `${lcaParentId}->${answerNextNode.taxId}`;
+    if (!edgeSet.has(aKey)) {
+      edgeSet.add(aKey);
+      edges.push({ parentId: lcaParentId, childId: answerNextNode.taxId });
+    }
+    mysteryParentId = answerNextNode.taxId;
+    mysteryDepth = answerNextNode.depth;
+  }
+
+  // Place mystery below the deepest known node on the answer path
+  // (hint nodes, LCA nodes, or answer-branch nodes)
+  let bestParentId = mysteryParentId;
+  let bestDepth = mysteryDepth;
   for (const [, node] of nodes) {
-    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestLcaDepth) {
-      bestLcaDepth = node.depth;
-      bestLcaTaxId = node.taxId;
+    if ((node.isLca || node.isHint || node.isAnswerBranch) && (node.depth ?? 0) > bestDepth) {
+      bestDepth = node.depth;
+      bestParentId = node.taxId;
     }
   }
 
@@ -159,12 +185,12 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     name: '?',
     commonName: 'Mystery Bird',
     rank: 'species',
-    depth: bestLcaDepth + 1,
+    depth: bestDepth + 1,
     isLeaf: true,
     isMystery: true,
-    parentLcaTaxId: bestLcaTaxId,
+    parentLcaTaxId: bestParentId,
   });
-  edges.push({ parentId: bestLcaTaxId, childId: 'mystery' });
+  edges.push({ parentId: bestParentId, childId: 'mystery' });
 
   return { treeNodes: nodes, treeEdges: edges };
 }
@@ -192,11 +218,11 @@ function applyHintToTree(prevNodes, prevEdges, newHintNode, hintIndex, allHintNo
     edges.push({ parentId, childId: newHintNode.taxId });
   }
 
-  // Move mystery below the deepest known ancestor (hint or LCA)
+  // Move mystery below the deepest known node on the answer path
   let bestParentId = AVES_ROOT.taxId;
   let bestParentDepth = AVES_ROOT.depth;
   for (const [, node] of nodes) {
-    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestParentDepth) {
+    if ((node.isLca || node.isHint || node.isAnswerBranch) && (node.depth ?? 0) > bestParentDepth) {
       bestParentDepth = node.depth;
       bestParentId = node.taxId;
     }
@@ -309,6 +335,7 @@ function reducer(state, action) {
         correct: payload.correct || false,
         answer: payload.answer || null,
         ancestorNodes: payload.ancestorNodes || [],
+        answerNextNode: payload.answerNextNode || null,
       };
 
       const newGuesses = [...state.guesses, guess];
