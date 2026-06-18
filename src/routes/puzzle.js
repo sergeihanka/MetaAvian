@@ -299,6 +299,59 @@ router.get('/result', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/puzzle/extra-clue?n=0
+// Returns a sanitized sentence from the answer bird's Wikipedia article.
+// The bird's common and scientific name are stripped from the text so no
+// identity information reaches the client. Available after genus is revealed
+// (enforced client-side; server only validates puzzle exists).
+// ---------------------------------------------------------------------------
+
+const WIKI_UA = 'MetaAvian/1.0 (https://metaavian.com)';
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+router.get('/extra-clue', async (req, res) => {
+  const n = Math.max(0, parseInt(req.query.n || '0', 10));
+
+  const puzzle = await getTodayPuzzle();
+  if (!puzzle) return res.status(404).json({ error: 'No puzzle found for today.' });
+
+  const bird = puzzle.birdId;
+  const cacheKey = `extra_clues_${bird.ncbiTaxId}`;
+
+  let clues = cache.get(cacheKey);
+  if (!clues) {
+    try {
+      const wikiRes = await fetch(
+        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(bird.commonName)}`,
+        { headers: { 'User-Agent': WIKI_UA } }
+      );
+      if (!wikiRes.ok) return res.status(404).json({ error: 'No extra clues available.' });
+
+      const { extract = '' } = await wikiRes.json();
+
+      // Strip the bird's names so the client learns nothing about its identity
+      const nameRx = new RegExp(
+        `\\b(${escapeRe(bird.commonName)}|${escapeRe(bird.scientificName)})\\b`,
+        'gi'
+      );
+      clues = (extract.match(/[^.!?]+[.!?]+\s*/g) || [])
+        .map(s => s.replace(nameRx, 'this bird').trim())
+        .filter(s => s.length >= 20);
+
+      cache.set(cacheKey, clues, 12 * 60 * 60);
+    } catch {
+      return res.status(502).json({ error: 'Could not fetch clues right now.' });
+    }
+  }
+
+  if (!clues.length || n >= clues.length) {
+    return res.status(404).json({ error: 'No more clues available.' });
+  }
+
+  res.json({ clue: clues[n], clueNumber: n + 1, total: clues.length });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/v1/puzzle/reset-today
 // Increments resetCount so all clients treat today as a fresh puzzle.
 // Requires Authorization: Bearer <ADMIN_SECRET>

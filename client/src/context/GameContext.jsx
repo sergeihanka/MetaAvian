@@ -234,6 +234,7 @@ const initialState = {
 
   hintsUsed: 0,
   hintNodes: [],
+  extraClues: [],
 
   user: null,
   token: null,
@@ -295,6 +296,7 @@ function reducer(state, action) {
         showResults: saved.phase === 'won' || saved.phase === 'lost',
         hintsUsed: saved.hintsUsed || 0,
         hintNodes: saved.hintNodes || [],
+        extraClues: saved.extraClues || [],
       };
     }
 
@@ -358,6 +360,14 @@ function reducer(state, action) {
       };
     }
 
+    case 'REVEAL_EXTRA_CLUE': {
+      return {
+        ...state,
+        extraClues: [...state.extraClues, action.payload.clue],
+        guessesRemaining: state.guessesRemaining - 3,
+      };
+    }
+
     case 'SET_AUTH': {
       const { token, user } = action.payload;
       if (token) {
@@ -414,6 +424,7 @@ function persistGameState(state) {
     treeEdges: state.treeEdges,
     hintsUsed: state.hintsUsed,
     hintNodes: state.hintNodes,
+    extraClues: state.extraClues,
   };
   try {
     localStorage.setItem(key, JSON.stringify(toSave));

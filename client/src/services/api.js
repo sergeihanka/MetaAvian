@@ -44,6 +44,10 @@ export function getHint(level) {
   return request('GET', `/puzzle/hint?level=${level}`);
 }
 
+export function getExtraClue(n) {
+  return request('GET', `/puzzle/extra-clue?n=${n}`);
+}
+
 export function getPuzzleResult(date) {
   return request('GET', `/puzzle/result?date=${encodeURIComponent(date)}`);
 }
