@@ -225,6 +225,10 @@ router.get('/hint', async (req, res) => {
   }
 
   const bird = puzzle.birdId;
+  if (!bird) {
+    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
+  }
+
   const { ancestorPath, ancestorNames, ancestorRanks } = bird;
 
   const primaryRanks = { 1: ['order'], 2: ['family'], 3: ['genus'] };
@@ -316,6 +320,10 @@ router.get('/extra-clue', async (req, res) => {
   if (!puzzle) return res.status(404).json({ error: 'No puzzle found for today.' });
 
   const bird = puzzle.birdId;
+  if (!bird) {
+    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
+  }
+
   const cacheKey = `extra_clues_${bird.ncbiTaxId}`;
 
   let clues = cache.get(cacheKey);
