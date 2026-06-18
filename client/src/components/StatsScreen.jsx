@@ -165,15 +165,12 @@ export default function StatsScreen() {
       setLoading(true);
       getUserStats()
         .then((data) => setStats(data))
-        .catch(() => {
-          // Fall back to local stats
-          setStats(computeLocalStats());
-        })
+        .catch(() => setStats(computeLocalStats()))
         .finally(() => setLoading(false));
     } else {
       setStats(computeLocalStats());
     }
-  }, [showStats, user]);
+  }, [showStats, user, state.phase]);
 
   const handleClose = () => gameDispatch({ type: 'TOGGLE_STATS' });
 
