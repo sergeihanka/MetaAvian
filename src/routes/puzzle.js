@@ -172,6 +172,20 @@ router.post('/guess', guessLimiter, async (req, res) => {
     }
   }
 
+  // Build intermediate ancestor nodes: all taxonomy stops between LCA and the
+  // guess species (exclusive of LCA, exclusive of the species leaf itself).
+  // These let the client draw the full path from LCA → genus → species in the tree.
+  const ancestorNodes = [];
+  for (let i = lcaResult.lcaDepth + 1; i < guessBird.ancestorPath.length; i++) {
+    if (guessBird.ancestorRanks[i] === 'species') continue;
+    ancestorNodes.push({
+      taxId: guessBird.ancestorPath[i],
+      name: guessBird.ancestorNames[i],
+      rank: guessBird.ancestorRanks[i],
+      depth: i,
+    });
+  }
+
   // 8. Return wrong-guess response (never include answer bird identity)
   res.json({
     correct: false,
@@ -188,7 +202,7 @@ router.post('/guess', guessLimiter, async (req, res) => {
       depth: lcaResult.lcaDepth,
     },
     feedbackTemperature: lcaResult.feedbackTemperature,
-    ancestorPath: lcaResult.ancestorPath,
+    ancestorNodes,
   });
 });
 

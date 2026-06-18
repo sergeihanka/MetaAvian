@@ -81,7 +81,7 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     return { treeNodes: nodes, treeEdges: edges };
   }
 
-  const { lca, feedbackTemperature, commonName } = normalizedGuess;
+  const { lca, feedbackTemperature, commonName, ancestorNodes } = normalizedGuess;
   const lcaTaxId = lca?.taxId;
   const lcaDepth = lca?.depth ?? 1;
 
@@ -101,15 +101,39 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     }
   }
 
-  // Add guess leaf
-  const leafParent = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
+  // Chain intermediate taxonomy nodes (family, genus, etc.) between LCA and leaf.
+  // These are specific to the guess bird's ancestry and show the user which
+  // taxonomy groups their wrong guess belongs to.
+  let deepestAncestorId = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
+  let deepestAncestorDepth = lcaDepth;
+  if (ancestorNodes && ancestorNodes.length > 0) {
+    for (const iNode of ancestorNodes) {
+      nodes.set(iNode.taxId, {
+        taxId: iNode.taxId,
+        name: iNode.name,
+        rank: iNode.rank,
+        depth: iNode.depth,
+        isIntermediateAncestor: true,
+      });
+      const ek = `${deepestAncestorId}->${iNode.taxId}`;
+      if (!edgeSet.has(ek)) {
+        edgeSet.add(ek);
+        edges.push({ parentId: deepestAncestorId, childId: iNode.taxId });
+      }
+      deepestAncestorId = iNode.taxId;
+      deepestAncestorDepth = iNode.depth;
+    }
+  }
+
+  // Add guess leaf — connected to deepest intermediate node (or LCA if none)
+  const leafParent = deepestAncestorId;
   const leafId = `leaf_${commonName}`;
   nodes.set(leafId, {
     taxId: leafId,
     name: commonName,
     commonName,
     rank: 'species',
-    depth: lcaDepth + 1,
+    depth: deepestAncestorDepth + 1,
     isLeaf: true,
     feedbackTemperature,
     parentLcaTaxId: leafParent,
@@ -284,6 +308,7 @@ function reducer(state, action) {
         lca: payload.lca || null,
         correct: payload.correct || false,
         answer: payload.answer || null,
+        ancestorNodes: payload.ancestorNodes || [],
       };
 
       const newGuesses = [...state.guesses, guess];
