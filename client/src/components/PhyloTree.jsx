@@ -324,9 +324,8 @@ function TreeNode({ node, position, isNew, onClick }) {
     );
   }
 
-  // ── Internal node: LCA, hint, or answer-branch ──
+  // ── Internal node: LCA or hint ──
   const isHint = node.isHint;
-  const isAnswerBranch = node.isAnswerBranch && !node.isHint;
   return (
     <Box sx={chipSx} onClick={isClickable ? () => onClick(node) : undefined}>
       <Chip
@@ -348,8 +347,8 @@ function TreeNode({ node, position, isNew, onClick }) {
           bgcolor: 'background.paper',
           maxWidth: MIN_NODE_WIDTH + 60,
           height: 'auto',
-          borderColor: isHint ? '#169A43' : isAnswerBranch ? '#ED6C02' : 'divider',
-          borderWidth: (isHint || isAnswerBranch) ? 2 : 1,
+          borderColor: isHint ? '#169A43' : 'divider',
+          borderWidth: isHint ? 2 : 1,
           '& .MuiChip-label': { py: 0.5, px: 1, whiteSpace: 'normal' },
         }}
         aria-label={`${node.rank || 'taxon'}: ${node.name}`}

@@ -186,23 +186,6 @@ router.post('/guess', guessLimiter, async (req, res) => {
     });
   }
 
-  // The immediate child of the LCA on the ANSWER bird's side.
-  // Reveals which branch the answer takes from the LCA ("family B, not family A"),
-  // giving players a directional clue without revealing the species.
-  let answerNextNode = null;
-  const answerNextIdx = lcaResult.lcaDepth + 1;
-  if (
-    answerNextIdx < answerBird.ancestorPath.length &&
-    answerBird.ancestorRanks[answerNextIdx] !== 'species'
-  ) {
-    answerNextNode = {
-      taxId: answerBird.ancestorPath[answerNextIdx],
-      name: answerBird.ancestorNames[answerNextIdx],
-      rank: answerBird.ancestorRanks[answerNextIdx],
-      depth: answerNextIdx,
-    };
-  }
-
   // 8. Return wrong-guess response (never include answer bird identity)
   res.json({
     correct: false,
@@ -220,7 +203,6 @@ router.post('/guess', guessLimiter, async (req, res) => {
     },
     feedbackTemperature: lcaResult.feedbackTemperature,
     ancestorNodes,
-    answerNextNode,
   });
 });
 
