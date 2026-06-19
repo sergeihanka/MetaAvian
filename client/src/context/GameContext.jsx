@@ -62,12 +62,57 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     }
   }
 
-  // Correct guess — reveal the mystery node in place
+  // Correct guess — reveal the full taxonomy chain then place mystery at the leaf
   if (normalizedGuess.correct) {
-    const existing = nodes.get('mystery') || {};
-    const revealedName = normalizedGuess.answer?.commonName || normalizedGuess.commonName;
+    const { answer } = normalizedGuess;
+    const ancestorPath  = answer?.ancestorPath  || [];
+    const ancestorNames = answer?.ancestorNames || [];
+    const ancestorRanks = answer?.ancestorRanks || [];
+    const revealedName  = answer?.commonName || normalizedGuess.commonName;
+
+    // IDs in the answer's chain below Aves root (used to clean stale shortcut edges)
+    const chainIds = new Set(ancestorPath.slice(1));
+
+    // Drop old mystery edge + any wrong-guess "Aves → chainNode" shortcut edges
+    const cleanEdges = edges.filter(
+      (e) => e.childId !== 'mystery' &&
+             !(e.parentId === AVES_ROOT.taxId && chainIds.has(e.childId))
+    );
+    const edgeSet = new Set(cleanEdges.map((e) => `${e.parentId}->${e.childId}`));
+
+    // Default: keep mystery where it was if we have no chain data
+    let mysteryParentId = (nodes.get('mystery') || {}).parentLcaTaxId || AVES_ROOT.taxId;
+
+    if (ancestorPath.length > 1) {
+      let prevId = AVES_ROOT.taxId;
+      for (let i = 1; i < ancestorPath.length; i++) {
+        const taxId = ancestorPath[i];
+        const name  = ancestorNames[i];
+        const rank  = ancestorRanks[i];
+
+        if (rank === 'species') {
+          // Mystery replaces the species leaf — stop here
+          mysteryParentId = prevId;
+          break;
+        }
+
+        // Preserve isHint flag if node was already revealed via a hint
+        const existing = nodes.get(taxId) || {};
+        nodes.set(taxId, { ...existing, taxId, name, rank, depth: i, isLca: true });
+
+        const key = `${prevId}->${taxId}`;
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          cleanEdges.push({ parentId: prevId, childId: taxId });
+        }
+        prevId = taxId;
+        mysteryParentId = taxId; // fallback if no species rank found
+      }
+    }
+
+    const existingMystery = nodes.get('mystery') || {};
     nodes.set('mystery', {
-      ...existing,
+      ...existingMystery,
       name: revealedName,
       commonName: revealedName,
       feedbackTemperature: 'correct',
@@ -75,9 +120,8 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
       isMystery: true,
       isLeaf: true,
     });
-    const mysteryParent = existing.parentLcaTaxId || AVES_ROOT.taxId;
-    edges.push({ parentId: mysteryParent, childId: 'mystery' });
-    return { treeNodes: nodes, treeEdges: edges };
+    cleanEdges.push({ parentId: mysteryParentId, childId: 'mystery' });
+    return { treeNodes: nodes, treeEdges: cleanEdges };
   }
 
   const { lca, feedbackTemperature, commonName } = normalizedGuess;

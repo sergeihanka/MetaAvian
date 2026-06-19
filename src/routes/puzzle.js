@@ -123,6 +123,9 @@ router.post('/guess', guessLimiter, async (req, res) => {
         order: answerBird.order,
         family: answerBird.family,
         ncbiUrl: `https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=${answerBird.ncbiTaxId}`,
+        ancestorPath: answerBird.ancestorPath,
+        ancestorNames: answerBird.ancestorNames,
+        ancestorRanks: answerBird.ancestorRanks,
       },
     });
   }
