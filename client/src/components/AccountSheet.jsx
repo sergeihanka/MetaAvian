@@ -252,7 +252,7 @@ function SignedInView({ user, state, dispatch }) {
       .then((data) => setStats(data))
       .catch(() => setStats(computeLocalStats()))
       .finally(() => setStatsLoading(false));
-  }, []);
+  }, [state.phase]); // re-fetch when a game completes
 
   const handleViewResults = () => {
     dispatch({ type: "TOGGLE_ACCOUNT" });
