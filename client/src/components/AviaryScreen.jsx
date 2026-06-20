@@ -25,7 +25,7 @@ export default function AviaryScreen() {
     showAviary,
     aviaryBirds,
     aviaryLoaded,
-    featherBalance,
+    berryBalance,
     birdEquipment,
     ownedAccessories,
     user,
@@ -82,7 +82,7 @@ export default function AviaryScreen() {
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Chip
-            label={`🪶 ${featherBalance}`}
+            label={`🫐 ${berryBalance}`}
             size="small"
             sx={{
               backgroundColor: '#FFF8E1',
@@ -91,7 +91,7 @@ export default function AviaryScreen() {
               fontSize: '13px',
               border: '1px solid #B8860B',
             }}
-            aria-label={`${featherBalance} feathers`}
+            aria-label={`${berryBalance} berries`}
           />
           <IconButton
             aria-label="Close aviary"

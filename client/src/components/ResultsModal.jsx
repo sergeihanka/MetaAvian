@@ -27,7 +27,7 @@ const HINT_COSTS = [3, 4, 5];
 
 export default function ResultsModal() {
   const { state, dispatch } = useGame();
-  const { showResults, phase, guesses, puzzleNumber, guessLimit, hintsUsed = 0, user, pendingFeatherAward, pendingBirdUnlock } = state;
+  const { showResults, phase, guesses, puzzleNumber, guessLimit, hintsUsed = 0, user, pendingBerryAward, pendingBirdUnlock } = state;
   const [snackOpen, setSnackOpen] = useState(false);
 
   const handleClose = () => dispatch({ type: 'TOGGLE_RESULTS' });
@@ -195,9 +195,9 @@ export default function ResultsModal() {
               Share
             </Button>
 
-            {isWon && user && pendingFeatherAward && (
+            {isWon && user && pendingBerryAward && (
               <FeatherToast
-                amount={pendingFeatherAward}
+                amount={pendingBerryAward}
                 onDismiss={() => dispatch({ type: 'CLEAR_PENDING_TOASTS' })}
               />
             )}

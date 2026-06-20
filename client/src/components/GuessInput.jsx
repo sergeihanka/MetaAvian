@@ -63,18 +63,18 @@ export default function GuessInput() {
             guessCount: state.guesses.length + 1,
             durationMs: null,
           });
-          if (sessionResult.featherAward > 0 || sessionResult.newBirdUnlocked) {
+          if (sessionResult.berryAward > 0 || sessionResult.newBirdUnlocked) {
             dispatch({
-              type: 'AWARD_FEATHERS',
+              type: 'AWARD_BERRIES',
               payload: {
-                amount: sessionResult.featherAward,
+                amount: sessionResult.berryAward,
                 newBirdId: sessionResult.newBirdUnlocked ? 'pending' : null,
                 birdName: result.answer?.commonName || '',
               },
             });
           }
         } catch {
-          // Non-fatal — feather award is a bonus, not core gameplay
+          // Non-fatal — berry award is a bonus, not core gameplay
         }
       }
     } catch (err) {

@@ -38,9 +38,9 @@ export default function FeatherToast({ amount, onDismiss }) {
         transition: 'transform 0.6s ease-out, opacity 0.6s ease-out',
       }}
     >
-      <Typography sx={{ fontSize: 20 }} aria-hidden="true">🪶</Typography>
+      <Typography sx={{ fontSize: 20 }} aria-hidden="true">🫐</Typography>
       <Typography sx={{ fontWeight: 700, color: '#169A43', fontSize: '16px' }}>
-        +{amount} Feathers!
+        +{amount} Berries!
       </Typography>
     </Box>
   );

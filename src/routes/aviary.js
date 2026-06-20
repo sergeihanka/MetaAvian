@@ -22,8 +22,8 @@ const shopCache = new NodeCache({ stdTTL: 3600 });
 
 router.get('/me', aviaryMeLimiter, requireAuth, async (req, res) => {
   const user = await User.findById(req.user.id, {
-    featherBalance: 1,
-    featherLifetime: 1,
+    berryBalance: 1,
+    berryLifetime: 1,
     aviaryBirds: 1,
     ownedAccessories: 1,
     birdEquipment: 1,
@@ -40,8 +40,8 @@ router.get('/me', aviaryMeLimiter, requireAuth, async (req, res) => {
 
   res.json({
     birds: user.aviaryBirds || [],
-    featherBalance: user.featherBalance || 0,
-    featherLifetime: user.featherLifetime || 0,
+    berryBalance: user.berryBalance || 0,
+    berryLifetime: user.berryLifetime || 0,
     ownedAccessories: user.ownedAccessories || [],
     birdEquipment: user.birdEquipment || {},
     activeBirdId: user.activeBirdId || null,
@@ -166,47 +166,47 @@ router.post('/shop/purchase', purchaseLimiter, requireAuth, async (req, res) => 
   const updated = await User.findOneAndUpdate(
     {
       _id: req.user.id,
-      featherBalance: { $gte: accessory.cost },
+      berryBalance: { $gte: accessory.cost },
       ownedAccessories: { $nin: [accessory._id] },
     },
     {
-      $inc: { featherBalance: -accessory.cost },
+      $inc: { berryBalance: -accessory.cost },
       $push: { ownedAccessories: accessory._id },
     },
-    { new: true, projection: { featherBalance: 1, ownedAccessories: 1 } }
+    { new: true, projection: { berryBalance: 1, ownedAccessories: 1 } }
   ).populate('ownedAccessories', 'name slug category cost iconPath fullPath overlayStyle');
 
   if (!updated) {
-    const user = await User.findById(req.user.id, { featherBalance: 1, ownedAccessories: 1 });
+    const user = await User.findById(req.user.id, { berryBalance: 1, ownedAccessories: 1 });
     if (!user) return res.status(404).json({ error: 'User not found.' });
     if (user.ownedAccessories.map((id) => id.toString()).includes(accessory._id.toString())) {
       return res.status(409).json({ error: 'You already own this accessory.' });
     }
-    return res.status(400).json({ error: 'Insufficient feathers.' });
+    return res.status(400).json({ error: 'Insufficient berries.' });
   }
 
   res.json({
-    featherBalance: updated.featherBalance,
+    berryBalance: updated.berryBalance,
     ownedAccessories: updated.ownedAccessories,
   });
 });
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/aviary/feathers
-// Returns feather balance and last 30 history entries.
+// Returns berry balance and last 30 history entries.
 // ---------------------------------------------------------------------------
 
 router.get('/feathers', requireAuth, async (req, res) => {
   const user = await User.findById(req.user.id, {
-    featherBalance: 1,
-    featherHistory: { $slice: -30 },
+    berryBalance: 1,
+    berryHistory: { $slice: -30 },
   }).lean();
 
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   res.json({
-    featherBalance: user.featherBalance || 0,
-    featherHistory: user.featherHistory || [],
+    berryBalance: user.berryBalance || 0,
+    berryHistory: user.berryHistory || [],
   });
 });
 

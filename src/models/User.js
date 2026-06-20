@@ -35,14 +35,14 @@ const userSchema = new mongoose.Schema({
     guessDistribution: { type: Map, of: Number, default: {} },
     lastPlayedDate: String,
   },
-  featherBalance: { type: Number, default: 0, min: 0 },
-  featherLifetime: { type: Number, default: 0 },
+  berryBalance: { type: Number, default: 0, min: 0 },
+  berryLifetime: { type: Number, default: 0 },
   aviaryBirds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Bird' }],
   aviaryStarterPicked: { type: Boolean, default: false },
   activeBirdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bird', default: null },
   ownedAccessories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Accessory' }],
   birdEquipment: { type: Map, of: String, default: {} },
-  featherHistory: [{
+  berryHistory: [{
     date: { type: Date, default: Date.now },
     amount: Number,
     reason: String,
@@ -55,7 +55,7 @@ userSchema.index({ googleId: 1 }, { sparse: true });
 userSchema.index({ appleId: 1 }, { sparse: true });
 userSchema.index({ emailVerifyToken: 1 }, { sparse: true });
 userSchema.index({ passwordResetToken: 1 }, { sparse: true });
-userSchema.index({ featherBalance: 1 });
+userSchema.index({ berryBalance: 1 });
 userSchema.index({ aviaryBirds: 1 });
 userSchema.index({ activeBirdId: 1 }, { sparse: true });
 

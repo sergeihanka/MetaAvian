@@ -15,7 +15,7 @@ export default function HatShop({
   birdId,
   equippedAccessoryId,
   ownedAccessories,
-  featherBalance,
+  berryBalance,
   onPurchase,
   onEquip,
   onUnequip,
@@ -154,7 +154,7 @@ export default function HatShop({
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {shop.map((item) => {
               const owned = ownedIds.has(item._id);
-              const canAfford = featherBalance >= item.cost;
+              const canAfford = berryBalance >= item.cost;
               return (
                 <Box
                   key={item._id}
@@ -182,7 +182,7 @@ export default function HatShop({
                       {item.description}
                     </Typography>
                     <Typography variant="caption" sx={{ fontWeight: 700, color: '#B8860B' }}>
-                      {item.cost} 🪶
+                      {item.cost} 🫐
                     </Typography>
                   </Box>
                   {owned ? (
@@ -198,7 +198,7 @@ export default function HatShop({
                       disabled={!canAfford}
                       onClick={() => setConfirmItem(item)}
                       sx={{ minHeight: 36, fontSize: '12px', flexShrink: 0 }}
-                      aria-label={canAfford ? `Buy ${item.name} for ${item.cost} feathers` : `Need ${item.cost - featherBalance} more feathers for ${item.name}`}
+                      aria-label={canAfford ? `Buy ${item.name} for ${item.cost} berries` : `Need ${item.cost - berryBalance} more berries for ${item.name}`}
                     >
                       Buy
                     </Button>
@@ -220,10 +220,10 @@ export default function HatShop({
         <DialogTitle id="purchase-confirm-title" sx={{ pb: 0.5 }}>Confirm Purchase</DialogTitle>
         <DialogContent>
           <Typography variant="body1">
-            Spend <strong>{confirmItem?.cost} 🪶</strong> on <strong>{confirmItem?.name}</strong>?
+            Spend <strong>{confirmItem?.cost} 🫐</strong> on <strong>{confirmItem?.name}</strong>?
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            You have {featherBalance} feathers. You&apos;ll have {featherBalance - (confirmItem?.cost || 0)} after.
+            You have {berryBalance} berries. You&apos;ll have {berryBalance - (confirmItem?.cost || 0)} after.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>

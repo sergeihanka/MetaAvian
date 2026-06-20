@@ -296,8 +296,8 @@ const initialState = {
   error: null,
 
   // Gamification
-  featherBalance: 0,
-  featherLifetime: 0,
+  berryBalance: 0,
+  berryLifetime: 0,
   aviaryBirds: [],
   ownedAccessories: [],
   birdEquipment: {},
@@ -312,7 +312,7 @@ const initialState = {
   starterBirds: [],
 
   // Pending toasts
-  pendingFeatherAward: null,
+  pendingBerryAward: null,
   pendingBirdUnlock: null,
 };
 
@@ -469,12 +469,12 @@ function reducer(state, action) {
       return { ...state, error: null };
 
     case 'LOAD_AVIARY': {
-      const { birds, featherBalance, featherLifetime, ownedAccessories, birdEquipment, activeBirdId } = action.payload;
+      const { birds, berryBalance, berryLifetime, ownedAccessories, birdEquipment, activeBirdId } = action.payload;
       return {
         ...state,
         aviaryBirds: birds || [],
-        featherBalance: featherBalance || 0,
-        featherLifetime: featherLifetime || 0,
+        berryBalance: berryBalance || 0,
+        berryLifetime: berryLifetime || 0,
         ownedAccessories: ownedAccessories || [],
         birdEquipment: birdEquipment || {},
         activeBirdId: activeBirdId || null,
@@ -482,13 +482,13 @@ function reducer(state, action) {
       };
     }
 
-    case 'AWARD_FEATHERS': {
+    case 'AWARD_BERRIES': {
       const { amount, newBirdId, birdName } = action.payload;
       return {
         ...state,
-        featherBalance: state.featherBalance + (amount || 0),
-        featherLifetime: state.featherLifetime + (amount || 0),
-        pendingFeatherAward: amount > 0 ? amount : null,
+        berryBalance: state.berryBalance + (amount || 0),
+        berryLifetime: state.berryLifetime + (amount || 0),
+        pendingBerryAward: amount > 0 ? amount : null,
         pendingBirdUnlock: newBirdId ? { birdName } : null,
       };
     }
@@ -508,7 +508,7 @@ function reducer(state, action) {
       return {
         ...state,
         ownedAccessories: alreadyOwned ? state.ownedAccessories : [...state.ownedAccessories, accessory],
-        featherBalance: newBalance,
+        berryBalance: newBalance,
       };
     }
 
@@ -554,7 +554,7 @@ function reducer(state, action) {
     }
 
     case 'CLEAR_PENDING_TOASTS':
-      return { ...state, pendingFeatherAward: null, pendingBirdUnlock: null };
+      return { ...state, pendingBerryAward: null, pendingBirdUnlock: null };
 
     default:
       return state;

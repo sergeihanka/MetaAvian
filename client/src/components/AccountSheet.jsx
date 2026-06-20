@@ -312,11 +312,11 @@ function SignedInView({ user, state, dispatch }) {
         </Box>
       ) : null}
 
-      {/* Feather balance */}
+      {/* Berry balance */}
       {stats && (
         <Box sx={{ textAlign: "center", mt: -0.5 }}>
           <Typography variant="body2" color="text.secondary">
-            🪶 <strong>{state.featherBalance}</strong> Feathers
+            🫐 <strong>{state.berryBalance}</strong> Berries
           </Typography>
         </Box>
       )}

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import GameSession from '../models/GameSession.js';
 import User from '../models/User.js';
 import DailyPuzzle from '../models/DailyPuzzle.js';
-import { calcFeatherAward } from '../services/feathers.js';
+import { calcBerryAward } from '../services/feathers.js';
 import { optionalAuth } from '../middleware/authMiddleware.js';
 
 const router = Router();
@@ -58,21 +58,21 @@ router.post('/session', optionalAuth, async (req, res) => {
   // Read-back verification: confirm the document actually persisted
   const verified = await GameSession.exists({ _id: session._id });
 
-  // Award feathers + unlock bird for authenticated users on win
-  let featherAward = 0;
+  // Award berries + unlock bird for authenticated users on win
+  let berryAward = 0;
   let newBirdUnlocked = false;
 
   if (won && userId) {
     const user = await User.findById(userId);
     if (user) {
-      const alreadyAwarded = user.featherHistory.some((h) => h.puzzleDate === puzzleDate);
+      const alreadyAwarded = user.berryHistory.some((h) => h.puzzleDate === puzzleDate);
       if (!alreadyAwarded) {
-        featherAward = calcFeatherAward(Number(guessCount) || normalizedGuesses.length);
-        user.featherBalance += featherAward;
-        user.featherLifetime += featherAward;
-        user.featherHistory.push({ date: new Date(), amount: featherAward, reason: 'puzzle_win', puzzleDate });
-        if (user.featherHistory.length > 90) {
-          user.featherHistory = user.featherHistory.slice(-90);
+        berryAward = calcBerryAward(Number(guessCount) || normalizedGuesses.length);
+        user.berryBalance += berryAward;
+        user.berryLifetime += berryAward;
+        user.berryHistory.push({ date: new Date(), amount: berryAward, reason: 'puzzle_win', puzzleDate });
+        if (user.berryHistory.length > 90) {
+          user.berryHistory = user.berryHistory.slice(-90);
         }
       }
 
@@ -95,7 +95,7 @@ router.post('/session', optionalAuth, async (req, res) => {
     sessionId: session._id,
     persistedFor: userId ? 'user' : 'guest',
     userId: session.userId,
-    featherAward,
+    berryAward,
     newBirdUnlocked,
   });
 });

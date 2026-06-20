@@ -37,7 +37,7 @@ export const theme = createTheme({
       },
       variants: [
         {
-          props: { variant: 'feather' },
+          props: { variant: 'berry' },
           style: {
             backgroundColor: '#FFF8E1',
             color: '#B8860B',

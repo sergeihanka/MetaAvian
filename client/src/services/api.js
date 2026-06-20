@@ -116,6 +116,6 @@ export const purchaseAccessory = (slug)                    => request('POST', '/
 export const equipAccessory    = (birdId, accessoryId)     => request('POST', `/aviary/birds/${birdId}/equip`, { accessoryId });
 export const setActiveBird     = (birdId)                  => request('POST', '/aviary/active-bird', { birdId });
 export const getBirdInfo       = (birdId)                  => request('GET',  `/aviary/birds/${birdId}/info`);
-export const getFeatherBalance = ()                        => request('GET',  '/aviary/feathers');
+export const getBerryBalance   = ()                        => request('GET',  '/aviary/feathers');
 export const getWikiInfo       = (q)                       => request('GET',  `/wiki?q=${encodeURIComponent(q)}`);
 export const saveSession       = (data)                    => request('POST', '/stats/session', data);

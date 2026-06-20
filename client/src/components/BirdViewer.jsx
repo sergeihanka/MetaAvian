@@ -101,7 +101,7 @@ function InfoTab({ bird }) {
 
 export default function BirdViewer() {
   const { state, dispatch } = useGame();
-  const { showBirdViewer, viewingBirdId, aviaryBirds, birdEquipment, ownedAccessories, featherBalance } = state;
+  const { showBirdViewer, viewingBirdId, aviaryBirds, birdEquipment, ownedAccessories, berryBalance } = state;
 
   const [tab, setTab] = useState(0);
   const [birdRotation, setBirdRotation] = useState(0);
@@ -144,7 +144,7 @@ export default function BirdViewer() {
         type: 'PURCHASE_ACCESSORY',
         payload: {
           accessory: newAccessory,
-          newBalance: result.featherBalance,
+          newBalance: result.berryBalance,
         },
       });
     } catch (err) {
@@ -195,10 +195,10 @@ export default function BirdViewer() {
           <CloseIcon />
         </IconButton>
         <Chip
-          label={`🪶 ${featherBalance}`}
+          label={`🫐 ${berryBalance}`}
           size="small"
           sx={{ backgroundColor: '#FFF8E1', color: '#B8860B', fontWeight: 700, border: '1px solid #B8860B' }}
-          aria-label={`${featherBalance} feathers`}
+          aria-label={`${berryBalance} berries`}
         />
       </DialogTitle>
 
@@ -264,7 +264,7 @@ export default function BirdViewer() {
               birdId={viewingBirdId}
               equippedAccessoryId={equippedAccessoryId}
               ownedAccessories={ownedAccessories}
-              featherBalance={featherBalance}
+              berryBalance={berryBalance}
               onPurchase={handlePurchase}
               onEquip={handleEquip}
               onUnequip={handleUnequip}

@@ -12,7 +12,7 @@ import { useGame } from '../context/GameContext.jsx';
 
 export default function TopNav() {
   const { state, dispatch } = useGame();
-  const { user, featherBalance } = state;
+  const { user, berryBalance } = state;
 
   return (
     <AppBar
@@ -59,7 +59,7 @@ export default function TopNav() {
 
         {user && (
           <Chip
-            label={`🪶 ${featherBalance}`}
+            label={`🫐 ${berryBalance}`}
             onClick={() => dispatch({ type: 'TOGGLE_AVIARY' })}
             size="small"
             sx={{
@@ -70,7 +70,7 @@ export default function TopNav() {
               border: '1px solid #B8860B',
               cursor: 'pointer',
             }}
-            aria-label={`${featherBalance} feathers — open aviary`}
+            aria-label={`${berryBalance} berries — open aviary`}
           />
         )}
 
