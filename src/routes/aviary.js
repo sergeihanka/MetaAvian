@@ -43,7 +43,7 @@ router.get('/me', aviaryMeLimiter, requireAuth, async (req, res) => {
     featherBalance: user.featherBalance || 0,
     featherLifetime: user.featherLifetime || 0,
     ownedAccessories: user.ownedAccessories || [],
-    birdEquipment: user.birdEquipment ? Object.fromEntries(user.birdEquipment) : {},
+    birdEquipment: user.birdEquipment || {},
     activeBirdId: user.activeBirdId || null,
     aviaryStarterPicked: user.aviaryStarterPicked || false,
   });
