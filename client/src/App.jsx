@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -8,8 +8,8 @@ import Button from '@mui/material/Button';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
-import { useGame, getTodayUtc, loadGameState } from './context/GameContext.jsx';
-import { getPuzzleToday, getBirds } from './services/api.js';
+import { useGame, getPuzzleDate, loadGameState } from './context/GameContext.jsx';
+import { getPuzzleToday, getBirds, saveGameSession, getOrCreateGuestId } from './services/api.js';
 import { BIRD_LIST_KEY, BIRD_LIST_DATE_KEY, TOKEN_KEY } from './config.js';
 
 import TopNav from './components/TopNav.jsx';
@@ -131,6 +131,43 @@ export default function App() {
   const { state, dispatch } = useGame();
   const { phase, error } = state;
 
+  // Persist completed games to aviary.gamesessions. Re-runs (and re-verifies)
+  // if the user logs in after finishing, so the session is attached to their
+  // account. The server upserts, so reloads/replays never create duplicates.
+  const lastSavedRef = useRef('');
+  useEffect(() => {
+    if (phase !== 'won' && phase !== 'lost') return;
+    if (!state.puzzleDate) return;
+
+    const signature = `${state.puzzleDate}|${phase}|${state.user?.id || 'guest'}`;
+    if (lastSavedRef.current === signature) return;
+    lastSavedRef.current = signature;
+
+    saveGameSession({
+      puzzleDate: state.puzzleDate,
+      won: phase === 'won',
+      guessCount: state.guesses.length,
+      guesses: state.guesses.map((g, i) => ({
+        commonName: g.commonName,
+        lcaTaxId: g.lca?.taxId ?? null,
+        lcaName: g.lca?.name ?? null,
+        guessNumber: i + 1,
+      })),
+      guestId: getOrCreateGuestId(),
+    })
+      .then((res) => {
+        // If logged in, confirm the session was attached to the user account
+        if (state.user?.id && !res?.userId) {
+          // eslint-disable-next-line no-console
+          console.warn('Game session saved but not linked to user account.');
+        }
+      })
+      .catch(() => {
+        // Allow a retry on the next render / visit
+        lastSavedRef.current = '';
+      });
+  }, [phase, state.puzzleDate, state.user, state.guesses]);
+
   useEffect(() => {
     async function initialize() {
       // Handle OAuth token in hash
@@ -146,23 +183,25 @@ export default function App() {
         // 1. Load puzzle for today
         const puzzle = await getPuzzleToday();
         const puzzleDate = puzzle.date || puzzle.puzzleDate;
+        const resetCount = puzzle.resetCount ?? 0;
         dispatch({
           type: 'INIT_PUZZLE',
           payload: {
             puzzleDate,
             puzzleNumber: puzzle.puzzleNumber || puzzle.number,
             guessLimit: puzzle.guessLimit || 20,
+            resetCount,
           },
         });
 
         // 2. Restore saved game state for today
-        const savedState = loadGameState(puzzleDate);
+        const savedState = loadGameState(puzzleDate, resetCount);
         if (savedState && savedState.guesses && savedState.guesses.length > 0) {
           dispatch({ type: 'RESTORE_GAME_STATE', payload: savedState });
         }
 
         // 3. Load bird list (with cache)
-        const today = getTodayUtc();
+        const today = getPuzzleDate();
         const cachedDate = localStorage.getItem(BIRD_LIST_DATE_KEY);
         const cachedList = localStorage.getItem(BIRD_LIST_KEY);
 

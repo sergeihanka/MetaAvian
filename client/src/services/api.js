@@ -44,12 +44,36 @@ export function getHint(level) {
   return request('GET', `/puzzle/hint?level=${level}`);
 }
 
+export function getExtraClue(n) {
+  return request('GET', `/puzzle/extra-clue?n=${n}`);
+}
+
 export function getPuzzleResult(date) {
   return request('GET', `/puzzle/result?date=${encodeURIComponent(date)}`);
 }
 
 export function getGlobalStats(date) {
   return request('GET', `/stats/global?date=${encodeURIComponent(date)}`);
+}
+
+const GUEST_ID_KEY = 'aviary_guest_id';
+
+/** Stable per-device id so anonymous game sessions can be deduped server-side. */
+export function getOrCreateGuestId() {
+  let id = localStorage.getItem(GUEST_ID_KEY);
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `g_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(GUEST_ID_KEY, id);
+  }
+  return id;
+}
+
+/** Persist a completed game to aviary.gamesessions (token auto-attached if logged in). */
+export function saveGameSession(payload) {
+  return request('POST', '/stats/session', payload);
 }
 
 export function login(email, password) {

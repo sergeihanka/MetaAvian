@@ -25,6 +25,7 @@ const config = {
   smtp2go: { apiKey: process.env.SMTP2GO_API_KEY },
   emailFrom: process.env.EMAIL_FROM || 'noreply@metaavian.com',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  adminSecret: process.env.ADMIN_SECRET,
   isProduction: process.env.NODE_ENV === 'production',
 };
 

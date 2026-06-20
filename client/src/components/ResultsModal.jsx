@@ -25,7 +25,7 @@ const Transition = React.forwardRef(function Transition(props, ref) {
 
 export default function ResultsModal() {
   const { state, dispatch } = useGame();
-  const { showResults, phase, guesses, puzzleNumber, guessLimit, user, pendingFeatherAward, pendingBirdUnlock } = state;
+  const { showResults, phase, guesses, puzzleNumber, guessLimit, hintsUsed = 0, user, pendingFeatherAward, pendingBirdUnlock } = state;
   const [snackOpen, setSnackOpen] = useState(false);
 
   const handleClose = () => dispatch({ type: 'TOGGLE_RESULTS' });
@@ -35,14 +35,19 @@ export default function ResultsModal() {
   const correctGuess = guesses.find((g) => g.feedbackTemperature === 'correct');
   const answerBird = correctGuess || lastGuess;
 
-  const emojiRow = guesses.map((g) => TEMPERATURE_EMOJIS[g.feedbackTemperature] || '⬜').join('');
+  // Each purchased hint consumed guesses; show ❔ for those slots before guess emojis
+  const HINT_COSTS = [3, 4, 5];
+  const totalHintSlots = HINT_COSTS.slice(0, hintsUsed).reduce((a, b) => a + b, 0);
+  const hintEmojis = '❔'.repeat(totalHintSlots);
+  const guessEmojis = guesses.map((g) => TEMPERATURE_EMOJIS[g.feedbackTemperature] || '⬜').join('');
+  const emojiRow = hintEmojis + guessEmojis;
   const guessCount = guesses.length;
 
   const buildShareText = () => {
     const puzzleLabel = puzzleNumber ? `Puzzle #${puzzleNumber}` : 'Daily Puzzle';
     const resultLine =
       phase === 'won' ? `${guessCount}/${guessLimit}` : `X/${guessLimit}`;
-    return `Aviary 🪽 ${puzzleLabel}\n${resultLine}\n${emojiRow}\n\nhttps://aviary.app`;
+    return `MetaAvian 🪽 ${puzzleLabel}\n${resultLine}\n${emojiRow}\n\nhttps://MetaAvian.com`;
   };
 
   const handleShare = async () => {

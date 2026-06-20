@@ -20,12 +20,13 @@ function parseJwt(token) {
   }
 }
 
-function getTodayUtc() {
-  return new Date().toISOString().split('T')[0];
+function getPuzzleDate() {
+  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
 }
 
-function getGameStateKey(date) {
-  return `${GAME_STATE_KEY_PREFIX}${date}`;
+function getGameStateKey(date, resetCount) {
+  return `${GAME_STATE_KEY_PREFIX}${date}_r${resetCount ?? 0}`;
 }
 
 // NCBI Aves root
@@ -80,7 +81,7 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     return { treeNodes: nodes, treeEdges: edges };
   }
 
-  const { lca, feedbackTemperature, commonName } = normalizedGuess;
+  const { lca, feedbackTemperature, commonName, ancestorNodes } = normalizedGuess;
   const lcaTaxId = lca?.taxId;
   const lcaDepth = lca?.depth ?? 1;
 
@@ -100,32 +101,55 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     }
   }
 
-  // Add guess leaf
-  const leafParent = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
+  // Chain intermediate taxonomy nodes (family, genus, etc.) between LCA and leaf.
+  // These are the guess bird's own ancestry — clues about the wrong guess only.
+  let deepestAncestorId = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
+  let deepestAncestorDepth = lcaDepth;
+  if (ancestorNodes && ancestorNodes.length > 0) {
+    for (const iNode of ancestorNodes) {
+      nodes.set(iNode.taxId, {
+        taxId: iNode.taxId,
+        name: iNode.name,
+        rank: iNode.rank,
+        depth: iNode.depth,
+        isIntermediateAncestor: true,
+      });
+      const ek = `${deepestAncestorId}->${iNode.taxId}`;
+      if (!edgeSet.has(ek)) {
+        edgeSet.add(ek);
+        edges.push({ parentId: deepestAncestorId, childId: iNode.taxId });
+      }
+      deepestAncestorId = iNode.taxId;
+      deepestAncestorDepth = iNode.depth;
+    }
+  }
+
+  // Add guess leaf — connected to deepest intermediate node (or LCA if none)
   const leafId = `leaf_${commonName}`;
   nodes.set(leafId, {
     taxId: leafId,
     name: commonName,
     commonName,
     rank: 'species',
-    depth: lcaDepth + 1,
+    depth: deepestAncestorDepth + 1,
     isLeaf: true,
     feedbackTemperature,
-    parentLcaTaxId: leafParent,
+    parentLcaTaxId: deepestAncestorId,
   });
-  const leafKey = `${leafParent}->${leafId}`;
+  const leafKey = `${deepestAncestorId}->${leafId}`;
   if (!edgeSet.has(leafKey)) {
     edgeSet.add(leafKey);
-    edges.push({ parentId: leafParent, childId: leafId });
+    edges.push({ parentId: deepestAncestorId, childId: leafId });
   }
 
-  // Place mystery below deepest known ancestor (hint nodes or LCA nodes)
-  let bestLcaTaxId = AVES_ROOT.taxId;
-  let bestLcaDepth = AVES_ROOT.depth;
+  // Place mystery below the deepest known LCA or hint node on the answer path.
+  // Never reveal answer-side intermediate nodes — mystery stays opaque.
+  let bestParentId = AVES_ROOT.taxId;
+  let bestDepth = AVES_ROOT.depth;
   for (const [, node] of nodes) {
-    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestLcaDepth) {
-      bestLcaDepth = node.depth;
-      bestLcaTaxId = node.taxId;
+    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestDepth) {
+      bestDepth = node.depth;
+      bestParentId = node.taxId;
     }
   }
 
@@ -134,12 +158,12 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     name: '?',
     commonName: 'Mystery Bird',
     rank: 'species',
-    depth: bestLcaDepth + 1,
+    depth: bestDepth + 1,
     isLeaf: true,
     isMystery: true,
-    parentLcaTaxId: bestLcaTaxId,
+    parentLcaTaxId: bestParentId,
   });
-  edges.push({ parentId: bestLcaTaxId, childId: 'mystery' });
+  edges.push({ parentId: bestParentId, childId: 'mystery' });
 
   return { treeNodes: nodes, treeEdges: edges };
 }
@@ -167,7 +191,7 @@ function applyHintToTree(prevNodes, prevEdges, newHintNode, hintIndex, allHintNo
     edges.push({ parentId, childId: newHintNode.taxId });
   }
 
-  // Move mystery below the deepest known ancestor (hint or LCA)
+  // Move mystery below the deepest known LCA or hint node
   let bestParentId = AVES_ROOT.taxId;
   let bestParentDepth = AVES_ROOT.depth;
   for (const [, node] of nodes) {
@@ -195,6 +219,7 @@ function applyHintToTree(prevNodes, prevEdges, newHintNode, hintIndex, allHintNo
 const initialState = {
   puzzleDate: null,
   puzzleNumber: null,
+  resetCount: 0,
   guessLimit: GUESS_LIMIT,
 
   phase: 'loading',
@@ -209,6 +234,7 @@ const initialState = {
 
   hintsUsed: 0,
   hintNodes: [],
+  extraClues: [],
 
   user: null,
   token: null,
@@ -257,6 +283,7 @@ function reducer(state, action) {
         ...state,
         puzzleDate: action.payload.puzzleDate,
         puzzleNumber: action.payload.puzzleNumber,
+        resetCount: action.payload.resetCount ?? 0,
         guessLimit: action.payload.guessLimit || GUESS_LIMIT,
         guessesRemaining: action.payload.guessLimit || GUESS_LIMIT,
         phase: 'idle',
@@ -289,6 +316,7 @@ function reducer(state, action) {
         showResults: saved.phase === 'won' || saved.phase === 'lost',
         hintsUsed: saved.hintsUsed || 0,
         hintNodes: saved.hintNodes || [],
+        extraClues: saved.extraClues || [],
       };
     }
 
@@ -301,6 +329,7 @@ function reducer(state, action) {
         lca: payload.lca || null,
         correct: payload.correct || false,
         answer: payload.answer || null,
+        ancestorNodes: payload.ancestorNodes || [],
       };
 
       const newGuesses = [...state.guesses, guess];
@@ -348,6 +377,14 @@ function reducer(state, action) {
         guessesRemaining: state.guessesRemaining - cost,
         treeNodes,
         treeEdges,
+      };
+    }
+
+    case 'REVEAL_EXTRA_CLUE': {
+      return {
+        ...state,
+        extraClues: [...state.extraClues, action.payload.clue],
+        guessesRemaining: state.guessesRemaining - 3,
       };
     }
 
@@ -486,7 +523,7 @@ function reducer(state, action) {
 
 function persistGameState(state) {
   if (!state.puzzleDate) return;
-  const key = getGameStateKey(state.puzzleDate);
+  const key = getGameStateKey(state.puzzleDate, state.resetCount);
   const toSave = {
     guesses: state.guesses,
     guessesRemaining: state.guessesRemaining,
@@ -495,6 +532,7 @@ function persistGameState(state) {
     treeEdges: state.treeEdges,
     hintsUsed: state.hintsUsed,
     hintNodes: state.hintNodes,
+    extraClues: state.extraClues,
   };
   try {
     localStorage.setItem(key, JSON.stringify(toSave));
@@ -503,9 +541,9 @@ function persistGameState(state) {
   }
 }
 
-function loadGameState(date) {
+function loadGameState(date, resetCount) {
   try {
-    const raw = localStorage.getItem(getGameStateKey(date));
+    const raw = localStorage.getItem(getGameStateKey(date, resetCount));
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -548,7 +586,7 @@ export function GameProvider({ children }) {
   }, [state.guesses, state.phase]);
 
   return (
-    <GameContext.Provider value={{ state, dispatch, loadGameState, getTodayUtc }}>
+    <GameContext.Provider value={{ state, dispatch, loadGameState, getPuzzleDate }}>
       {children}
     </GameContext.Provider>
   );
@@ -560,4 +598,4 @@ export function useGame() {
   return ctx;
 }
 
-export { getTodayUtc, loadGameState };
+export { getPuzzleDate, loadGameState };

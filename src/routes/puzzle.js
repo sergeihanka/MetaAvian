@@ -5,6 +5,7 @@ import DailyPuzzle from '../models/DailyPuzzle.js';
 import TaxonomyNode from '../models/TaxonomyNode.js';
 import { computeGuessResult } from '../services/lca.js';
 import { guessLimiter } from '../middleware/rateLimiter.js';
+import config from '../config/index.js';
 
 const router = Router();
 const cache = new NodeCache();
@@ -13,18 +14,46 @@ const cache = new NodeCache();
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Returns today's date in YYYY-MM-DD format (UTC). */
-function todayUtc() {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Returns the current "puzzle date" as YYYY-MM-DD.
+ * The puzzle day starts at 9:00 AM Central Time (America/Chicago).
+ * Shifting back 9 hours and reading the Central date gives a date that
+ * flips exactly at 9 AM Central, handling DST automatically.
+ */
+function getPuzzleDate() {
+  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
 }
 
-/** Seconds remaining until next midnight UTC. */
-function secondsUntilMidnightUtc() {
+/** Seconds remaining until the next puzzle releases (9:00 AM Central Time). */
+function secondsUntilNextPuzzle() {
   const now = new Date();
-  const midnight = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
-  );
-  return Math.floor((midnight - now) / 1000);
+  const hourDtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    hour: '2-digit',
+    hour12: false,
+  });
+  const dateDtf = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' });
+
+  const centralHour =
+    parseInt(Object.fromEntries(hourDtf.formatToParts(now).map(p => [p.type, p.value])).hour, 10) % 24;
+
+  const targetDateStr =
+    centralHour < 9
+      ? dateDtf.format(now)
+      : dateDtf.format(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+
+  const [ty, tm, td] = targetDateStr.split('-').map(Number);
+
+  // Try CDT (UTC−5 → 9 AM = 14:00 UTC) then CST (UTC−6 → 9 AM = 15:00 UTC)
+  for (const utcHour of [14, 15]) {
+    const candidate = new Date(Date.UTC(ty, tm - 1, td, utcHour, 0, 0, 0));
+    const cHour =
+      parseInt(Object.fromEntries(hourDtf.formatToParts(candidate).map(p => [p.type, p.value])).hour, 10) % 24;
+    if (cHour === 9) return Math.max(0, Math.floor((candidate - now) / 1000));
+  }
+
+  return Math.max(0, Math.floor((new Date(Date.UTC(ty, tm - 1, td, 15, 0, 0)) - now) / 1000));
 }
 
 /**
@@ -32,19 +61,22 @@ function secondsUntilMidnightUtc() {
  * Returns null if no puzzle is configured for today.
  */
 async function getTodayPuzzle() {
-  const dateStr = todayUtc();
-  const cacheKey = `puzzle_${dateStr}`;
+  const dateStr = getPuzzleDate();
 
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
+  // First pass: find the puzzle to get its resetCount for the cache key
   const puzzle = await DailyPuzzle.findOne({ dateUtc: dateStr, isActive: true })
     .populate('birdId')
     .lean();
 
   if (!puzzle) return null;
 
-  const ttl = secondsUntilMidnightUtc();
+  const resetCount = puzzle.resetCount ?? 0;
+  const cacheKey = `puzzle_${dateStr}_r${resetCount}`;
+
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const ttl = secondsUntilNextPuzzle();
   cache.set(cacheKey, puzzle, ttl);
 
   return puzzle;
@@ -66,6 +98,7 @@ router.get('/today', async (req, res) => {
     puzzleNumber: puzzle.puzzleNumber,
     guessLimit: 25,
     date: puzzle.dateUtc,
+    resetCount: puzzle.resetCount ?? 0,
   });
 });
 
@@ -75,7 +108,7 @@ router.get('/today', async (req, res) => {
 
 router.post('/guess', guessLimiter, async (req, res) => {
   const { puzzleDate, birdCommonName, guessNumber } = req.body;
-  const today = todayUtc();
+  const today = getPuzzleDate();
 
   // 1. Validate puzzleDate
   if (!puzzleDate || puzzleDate !== today) {
@@ -139,6 +172,20 @@ router.post('/guess', guessLimiter, async (req, res) => {
     }
   }
 
+  // Build intermediate ancestor nodes: all taxonomy stops between LCA and the
+  // guess species (exclusive of LCA, exclusive of the species leaf itself).
+  // These let the client draw the full path from LCA → genus → species in the tree.
+  const ancestorNodes = [];
+  for (let i = lcaResult.lcaDepth + 1; i < guessBird.ancestorPath.length; i++) {
+    if (guessBird.ancestorRanks[i] === 'species') continue;
+    ancestorNodes.push({
+      taxId: guessBird.ancestorPath[i],
+      name: guessBird.ancestorNames[i],
+      rank: guessBird.ancestorRanks[i],
+      depth: i,
+    });
+  }
+
   // 8. Return wrong-guess response (never include answer bird identity)
   res.json({
     correct: false,
@@ -155,7 +202,7 @@ router.post('/guess', guessLimiter, async (req, res) => {
       depth: lcaResult.lcaDepth,
     },
     feedbackTemperature: lcaResult.feedbackTemperature,
-    ancestorPath: lcaResult.ancestorPath,
+    ancestorNodes,
   });
 });
 
@@ -178,6 +225,10 @@ router.get('/hint', async (req, res) => {
   }
 
   const bird = puzzle.birdId;
+  if (!bird) {
+    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
+  }
+
   const { ancestorPath, ancestorNames, ancestorRanks } = bird;
 
   const primaryRanks = { 1: ['order'], 2: ['family'], 3: ['genus'] };
@@ -215,7 +266,7 @@ router.get('/hint', async (req, res) => {
 
 router.get('/result', async (req, res) => {
   const { date } = req.query;
-  const today = todayUtc();
+  const today = getPuzzleDate();
 
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res.status(400).json({ error: 'A valid date parameter (YYYY-MM-DD) is required.' });
@@ -248,6 +299,99 @@ router.get('/result', async (req, res) => {
       ancestorNames: bird.ancestorNames,
       ancestorRanks: bird.ancestorRanks,
     },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/puzzle/extra-clue?n=0
+// Returns a sanitized sentence from the answer bird's Wikipedia article.
+// The bird's common and scientific name are stripped from the text so no
+// identity information reaches the client. Available after genus is revealed
+// (enforced client-side; server only validates puzzle exists).
+// ---------------------------------------------------------------------------
+
+const WIKI_UA = 'MetaAvian/1.0 (https://metaavian.com)';
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+router.get('/extra-clue', async (req, res) => {
+  const n = Math.max(0, parseInt(req.query.n || '0', 10));
+
+  const puzzle = await getTodayPuzzle();
+  if (!puzzle) return res.status(404).json({ error: 'No puzzle found for today.' });
+
+  const bird = puzzle.birdId;
+  if (!bird) {
+    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
+  }
+
+  const cacheKey = `extra_clues_${bird.ncbiTaxId}`;
+
+  let clues = cache.get(cacheKey);
+  if (!clues) {
+    try {
+      const wikiRes = await fetch(
+        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(bird.commonName)}`,
+        { headers: { 'User-Agent': WIKI_UA } }
+      );
+      if (!wikiRes.ok) return res.status(404).json({ error: 'No extra clues available.' });
+
+      const { extract = '' } = await wikiRes.json();
+
+      // Strip the bird's names so the client learns nothing about its identity
+      const nameRx = new RegExp(
+        `\\b(${escapeRe(bird.commonName)}|${escapeRe(bird.scientificName)})\\b`,
+        'gi'
+      );
+      clues = (extract.match(/[^.!?]+[.!?]+\s*/g) || [])
+        .map(s => s.replace(nameRx, 'this bird').trim())
+        .filter(s => s.length >= 20);
+
+      cache.set(cacheKey, clues, 12 * 60 * 60);
+    } catch {
+      return res.status(502).json({ error: 'Could not fetch clues right now.' });
+    }
+  }
+
+  if (!clues.length || n >= clues.length) {
+    return res.status(404).json({ error: 'No more clues available.' });
+  }
+
+  res.json({ clue: clues[n], clueNumber: n + 1, total: clues.length });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/puzzle/reset-today
+// Increments resetCount so all clients treat today as a fresh puzzle.
+// Requires Authorization: Bearer <ADMIN_SECRET>
+// ---------------------------------------------------------------------------
+
+router.post('/reset-today', async (req, res) => {
+  const secret = config.adminSecret;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: 'Unauthorized.' });
+  }
+
+  const dateStr = getPuzzleDate();
+
+  const puzzle = await DailyPuzzle.findOneAndUpdate(
+    { dateUtc: dateStr },
+    { $inc: { resetCount: 1 } },
+    { new: true }
+  );
+
+  if (!puzzle) {
+    return res.status(404).json({ error: `No puzzle found for ${dateStr}.` });
+  }
+
+  // Bust every cached entry for today regardless of previous resetCount
+  cache.keys().forEach((k) => {
+    if (k.startsWith(`puzzle_${dateStr}`)) cache.del(k);
+  });
+
+  res.json({
+    message: `Puzzle for ${dateStr} reset. resetCount is now ${puzzle.resetCount}.`,
+    date: dateStr,
+    resetCount: puzzle.resetCount,
   });
 });
 
