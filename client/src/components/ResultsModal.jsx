@@ -23,6 +23,8 @@ const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
 
+const HINT_COSTS = [3, 4, 5];
+
 export default function ResultsModal() {
   const { state, dispatch } = useGame();
   const { showResults, phase, guesses, puzzleNumber, guessLimit, hintsUsed = 0, user, pendingFeatherAward, pendingBirdUnlock } = state;
@@ -35,18 +37,18 @@ export default function ResultsModal() {
   const correctGuess = guesses.find((g) => g.feedbackTemperature === 'correct');
   const answerBird = correctGuess || lastGuess;
 
-  // Each purchased hint consumed guesses; show ❔ for those slots before guess emojis
-  const HINT_COSTS = [3, 4, 5];
-  const totalHintSlots = HINT_COSTS.slice(0, hintsUsed).reduce((a, b) => a + b, 0);
-  const hintEmojis = '❔'.repeat(totalHintSlots);
+  // One ❔ per hint purchased; effective count adds the guess slots each hint consumed
+  const totalHintCost = HINT_COSTS.slice(0, hintsUsed).reduce((a, b) => a + b, 0);
+  const hintEmojis = '❔'.repeat(hintsUsed);
   const guessEmojis = guesses.map((g) => TEMPERATURE_EMOJIS[g.feedbackTemperature] || '⬜').join('');
   const emojiRow = hintEmojis + guessEmojis;
   const guessCount = guesses.length;
+  const effectiveGuesses = guessCount + totalHintCost;
 
   const buildShareText = () => {
     const puzzleLabel = puzzleNumber ? `Puzzle #${puzzleNumber}` : 'Daily Puzzle';
     const resultLine =
-      phase === 'won' ? `${guessCount}/${guessLimit}` : `X/${guessLimit}`;
+      phase === 'won' ? `${effectiveGuesses}/${guessLimit}` : `X/${guessLimit}`;
     return `MetaAvian 🪽 ${puzzleLabel}\n${resultLine}\n${emojiRow}\n\nhttps://MetaAvian.com`;
   };
 
@@ -136,7 +138,7 @@ export default function ResultsModal() {
                   }}
                 >
                   <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                    Found in {guessCount} guess{guessCount === 1 ? '' : 'es'} 🎯
+                    Found in {effectiveGuesses} guess{effectiveGuesses === 1 ? '' : 'es'} 🎯
                   </Typography>
                 </Box>
               </>
@@ -168,7 +170,7 @@ export default function ResultsModal() {
                 sx={{ mb: 0.5 }}
               >
                 {puzzleNumber ? `Puzzle #${puzzleNumber}` : 'Today\'s puzzle'} ·{' '}
-                {isWon ? `${guessCount}/${guessLimit}` : `X/${guessLimit}`}
+                {isWon ? `${effectiveGuesses}/${guessLimit}` : `X/${guessLimit}`}
               </Typography>
               <Typography
                 sx={{
