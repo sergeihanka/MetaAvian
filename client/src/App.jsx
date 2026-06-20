@@ -24,6 +24,9 @@ import StatsScreen from './components/StatsScreen.jsx';
 import AboutScreen from './components/AboutScreen.jsx';
 import AccountSheet from './components/AccountSheet.jsx';
 import InstallBanner from './components/InstallBanner.jsx';
+import AviaryScreen from './components/AviaryScreen.jsx';
+import BirdViewer from './components/BirdViewer.jsx';
+import StarterBirdPicker from './components/StarterBirdPicker.jsx';
 
 // Handle OAuth token in URL hash — extract before first render
 function extractTokenFromHash() {
@@ -235,6 +238,9 @@ export default function App() {
       <AboutScreen />
       <AccountSheet />
       <InstallBanner />
+      <AviaryScreen />
+      <BirdViewer />
+      <StarterBirdPicker />
     </Box>
   );
 }

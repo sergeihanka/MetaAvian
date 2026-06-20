@@ -83,3 +83,15 @@ export function resetPassword(token, newPassword) {
 export function cancelRegistration(email) {
   return request('DELETE', '/auth/cancel-registration', { email });
 }
+
+export const getAviaryMe       = ()                        => request('GET',  '/aviary/me');
+export const getStarterBirds   = ()                        => request('GET',  '/aviary/birds/starters');
+export const postStarterBird   = (birdId)                  => request('POST', '/aviary/starter', { birdId });
+export const getShop           = ()                        => request('GET',  '/aviary/shop');
+export const purchaseAccessory = (slug)                    => request('POST', '/aviary/shop/purchase', { accessorySlug: slug });
+export const equipAccessory    = (birdId, accessoryId)     => request('POST', `/aviary/birds/${birdId}/equip`, { accessoryId });
+export const setActiveBird     = (birdId)                  => request('POST', '/aviary/active-bird', { birdId });
+export const getBirdInfo       = (birdId)                  => request('GET',  `/aviary/birds/${birdId}/info`);
+export const getFeatherBalance = ()                        => request('GET',  '/aviary/feathers');
+export const getWikiInfo       = (q)                       => request('GET',  `/wiki?q=${encodeURIComponent(q)}`);
+export const saveSession       = (data)                    => request('POST', '/stats/session', data);

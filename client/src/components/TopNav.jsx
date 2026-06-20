@@ -4,13 +4,15 @@ import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import SettingsIcon from '@mui/icons-material/Settings';
 import PersonIcon from '@mui/icons-material/Person';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { useGame } from '../context/GameContext.jsx';
 
 export default function TopNav() {
-  const { dispatch } = useGame();
+  const { state, dispatch } = useGame();
+  const { user, featherBalance } = state;
 
   return (
     <AppBar
@@ -54,6 +56,23 @@ export default function TopNav() {
             MetaAvian
           </Typography>
         </Box>
+
+        {user && (
+          <Chip
+            label={`🪶 ${featherBalance}`}
+            onClick={() => dispatch({ type: 'TOGGLE_AVIARY' })}
+            size="small"
+            sx={{
+              backgroundColor: '#FFF8E1',
+              color: '#B8860B',
+              fontWeight: 700,
+              fontSize: '13px',
+              border: '1px solid #B8860B',
+              cursor: 'pointer',
+            }}
+            aria-label={`${featherBalance} feathers — open aviary`}
+          />
+        )}
 
         <Toolbar component="div" disableGutters sx={{ gap: 0.5, p: 0 }}>
           <IconButton

@@ -8,7 +8,7 @@ import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import CheckIcon from '@mui/icons-material/Check';
 import { useGame } from '../context/GameContext.jsx';
-import { submitGuess } from '../services/api.js';
+import { submitGuess, saveSession } from '../services/api.js';
 
 export default function GuessInput() {
   const { state, dispatch } = useGame();
@@ -53,6 +53,30 @@ export default function GuessInput() {
       dispatch({ type: 'SUBMIT_GUESS', payload: result });
       setSelectedBird(null);
       setInputValue('');
+
+      const isGameOver = result.correct || (state.guessesRemaining - 1) <= 0;
+      if (isGameOver) {
+        try {
+          const sessionResult = await saveSession({
+            puzzleDate,
+            won: result.correct,
+            guessCount: state.guesses.length + 1,
+            durationMs: null,
+          });
+          if (sessionResult.featherAward > 0 || sessionResult.newBirdUnlocked) {
+            dispatch({
+              type: 'AWARD_FEATHERS',
+              payload: {
+                amount: sessionResult.featherAward,
+                newBirdId: sessionResult.newBirdUnlocked ? 'pending' : null,
+                birdName: result.answer?.commonName || '',
+              },
+            });
+          }
+        } catch {
+          // Non-fatal — feather award is a bonus, not core gameplay
+        }
+      }
     } catch (err) {
       setError(err.message || 'Failed to submit guess. Please try again.');
     } finally {

@@ -224,6 +224,26 @@ const initialState = {
   colorblindMode: false,
 
   error: null,
+
+  // Gamification
+  featherBalance: 0,
+  featherLifetime: 0,
+  aviaryBirds: [],
+  ownedAccessories: [],
+  birdEquipment: {},
+  activeBirdId: null,
+  aviaryLoaded: false,
+
+  // UI toggles (gamification)
+  showAviary: false,
+  showBirdViewer: false,
+  viewingBirdId: null,
+  showStarterPicker: false,
+  starterBirds: [],
+
+  // Pending toasts
+  pendingFeatherAward: null,
+  pendingBirdUnlock: null,
 };
 
 // ────────────────────────────────────────────────────────────
@@ -366,6 +386,94 @@ function reducer(state, action) {
       return { ...state, error: action.payload };
     case 'CLEAR_ERROR':
       return { ...state, error: null };
+
+    case 'LOAD_AVIARY': {
+      const { birds, featherBalance, featherLifetime, ownedAccessories, birdEquipment, activeBirdId } = action.payload;
+      return {
+        ...state,
+        aviaryBirds: birds || [],
+        featherBalance: featherBalance || 0,
+        featherLifetime: featherLifetime || 0,
+        ownedAccessories: ownedAccessories || [],
+        birdEquipment: birdEquipment || {},
+        activeBirdId: activeBirdId || null,
+        aviaryLoaded: true,
+      };
+    }
+
+    case 'AWARD_FEATHERS': {
+      const { amount, newBirdId, birdName } = action.payload;
+      return {
+        ...state,
+        featherBalance: state.featherBalance + (amount || 0),
+        featherLifetime: state.featherLifetime + (amount || 0),
+        pendingFeatherAward: amount > 0 ? amount : null,
+        pendingBirdUnlock: newBirdId ? { birdName } : null,
+      };
+    }
+
+    case 'UNLOCK_BIRD': {
+      const bird = action.payload;
+      const alreadyIn = state.aviaryBirds.some((b) => b._id === bird._id);
+      return {
+        ...state,
+        aviaryBirds: alreadyIn ? state.aviaryBirds : [...state.aviaryBirds, bird],
+      };
+    }
+
+    case 'PURCHASE_ACCESSORY': {
+      const { accessory, newBalance } = action.payload;
+      const alreadyOwned = state.ownedAccessories.some((a) => a._id === accessory._id);
+      return {
+        ...state,
+        ownedAccessories: alreadyOwned ? state.ownedAccessories : [...state.ownedAccessories, accessory],
+        featherBalance: newBalance,
+      };
+    }
+
+    case 'EQUIP_ACCESSORY':
+      return {
+        ...state,
+        birdEquipment: { ...state.birdEquipment, [action.payload.birdId]: action.payload.accessoryId },
+      };
+
+    case 'UNEQUIP_ACCESSORY': {
+      const newEquip = { ...state.birdEquipment };
+      newEquip[action.payload.birdId] = null;
+      return { ...state, birdEquipment: newEquip };
+    }
+
+    case 'SET_ACTIVE_BIRD':
+      return { ...state, activeBirdId: action.payload.birdId };
+
+    case 'TOGGLE_AVIARY':
+      return { ...state, showAviary: !state.showAviary };
+
+    case 'OPEN_BIRD_VIEWER':
+      return { ...state, showBirdViewer: true, viewingBirdId: action.payload.birdId };
+
+    case 'CLOSE_BIRD_VIEWER':
+      return { ...state, showBirdViewer: false, viewingBirdId: null };
+
+    case 'SHOW_STARTER_PICKER':
+      return { ...state, showStarterPicker: true };
+
+    case 'LOAD_STARTER_BIRDS':
+      return { ...state, starterBirds: action.payload };
+
+    case 'COMPLETE_STARTER': {
+      const starterBird = action.payload;
+      return {
+        ...state,
+        aviaryBirds: [starterBird],
+        activeBirdId: starterBird._id,
+        showStarterPicker: false,
+        aviaryLoaded: false,
+      };
+    }
+
+    case 'CLEAR_PENDING_TOASTS':
+      return { ...state, pendingFeatherAward: null, pendingBirdUnlock: null };
 
     default:
       return state;

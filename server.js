@@ -17,6 +17,7 @@ import puzzleRouter from './src/routes/puzzle.js';
 import usersRouter from './src/routes/users.js';
 import statsRouter from './src/routes/stats.js';
 import wikiRouter from './src/routes/wiki.js';
+import aviaryRouter from './src/routes/aviary.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -106,6 +107,7 @@ app.use('/api/v1/puzzle', puzzleRouter);
 app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/wiki', wikiRouter);
+app.use('/api/v1/aviary', aviaryRouter);
 
 // ---------------------------------------------------------------------------
 // Serve React client in production

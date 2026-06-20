@@ -16,6 +16,8 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useGame } from '../context/GameContext.jsx';
 import { TEMPERATURE_EMOJIS } from '../config.js';
 import CountdownTimer from './CountdownTimer.jsx';
+import FeatherToast from './FeatherToast.jsx';
+import BirdUnlockToast from './BirdUnlockToast.jsx';
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -23,7 +25,7 @@ const Transition = React.forwardRef(function Transition(props, ref) {
 
 export default function ResultsModal() {
   const { state, dispatch } = useGame();
-  const { showResults, phase, guesses, puzzleNumber, guessLimit } = state;
+  const { showResults, phase, guesses, puzzleNumber, guessLimit, user, pendingFeatherAward, pendingBirdUnlock } = state;
   const [snackOpen, setSnackOpen] = useState(false);
 
   const handleClose = () => dispatch({ type: 'TOGGLE_RESULTS' });
@@ -185,6 +187,38 @@ export default function ResultsModal() {
             >
               Share
             </Button>
+
+            {isWon && user && pendingFeatherAward && (
+              <FeatherToast
+                amount={pendingFeatherAward}
+                onDismiss={() => dispatch({ type: 'CLEAR_PENDING_TOASTS' })}
+              />
+            )}
+
+            {isWon && user && pendingBirdUnlock && (
+              <BirdUnlockToast
+                birdName={pendingBirdUnlock.birdName}
+                onDismiss={() => dispatch({ type: 'CLEAR_PENDING_TOASTS' })}
+                onOpenAviary={() => {
+                  dispatch({ type: 'TOGGLE_RESULTS' });
+                  dispatch({ type: 'TOGGLE_AVIARY' });
+                }}
+              />
+            )}
+
+            {isWon && user && (
+              <Button
+                variant="outlined"
+                fullWidth
+                onClick={() => {
+                  dispatch({ type: 'TOGGLE_RESULTS' });
+                  dispatch({ type: 'TOGGLE_AVIARY' });
+                }}
+                aria-label="View your aviary"
+              >
+                View Your Aviary 🐦
+              </Button>
+            )}
 
             <CountdownTimer />
 

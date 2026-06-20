@@ -27,6 +27,7 @@ import EmojiEventsOutlinedIcon from "@mui/icons-material/EmojiEventsOutlined";
 import { useGame } from "../context/GameContext.jsx";
 import { login, register, forgotPassword, resendVerification, getUserStats, cancelRegistration } from "../services/api.js";
 import { GAME_STATE_KEY_PREFIX } from "../config.js";
+import AviaryTeaser from "./AviaryTeaser.jsx";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -311,8 +312,25 @@ function SignedInView({ user, state, dispatch }) {
         </Box>
       ) : null}
 
+      {/* Feather balance */}
+      {stats && (
+        <Box sx={{ textAlign: "center", mt: -0.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            🪶 <strong>{state.featherBalance}</strong> Feathers
+          </Typography>
+        </Box>
+      )}
+
       {/* Action buttons */}
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        <Button
+          variant="contained"
+          fullWidth
+          onClick={() => { dispatch({ type: "TOGGLE_ACCOUNT" }); dispatch({ type: "TOGGLE_AVIARY" }); }}
+          aria-label="Open your aviary"
+        >
+          Open Your Aviary 🪽
+        </Button>
         {gameOver && (
           <Button
             variant="contained"
@@ -651,9 +669,14 @@ export default function AccountSheet() {
       </DialogTitle>
 
       <DialogContent sx={{ pb: 4 }}>
-        {user
-          ? <SignedInView user={user} state={state} dispatch={dispatch} />
-          : <EmailAuthForm dispatch={dispatch} onClose={handleClose} />}
+        {user ? (
+          <SignedInView user={user} state={state} dispatch={dispatch} />
+        ) : (
+          <>
+            <AviaryTeaser />
+            <EmailAuthForm dispatch={dispatch} onClose={handleClose} />
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
