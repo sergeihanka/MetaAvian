@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
@@ -7,18 +7,26 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
+import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
 import { useGame } from '../context/GameContext.jsx';
 import { TEMPERATURE_COLORS } from '../config.js';
 
 const ROW_HEIGHT = 90;
 const MIN_NODE_WIDTH = 120;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 3;
 
 // ─── Layout ─────────────────────────────────────────────────────────────────
 
-function computeLayout(treeNodes, treeEdges, containerWidth) {
-  if (!containerWidth || treeNodes.size === 0) return { positions: {}, totalHeight: ROW_HEIGHT };
+function computeLayout(treeNodes, treeEdges, containerWidth, zoom = 1) {
+  if (!containerWidth || treeNodes.size === 0) return { positions: {}, totalHeight: ROW_HEIGHT, totalWidth: containerWidth };
+
+  const w = containerWidth * zoom;
+  const rowH = ROW_HEIGHT * zoom;
 
   // NCBI depths can be large. Compress to sequential display rows.
   const depthSet = new Set();
@@ -38,15 +46,15 @@ function computeLayout(treeNodes, treeEdges, containerWidth) {
     rowNodes.forEach((node, idx) => {
       const x =
         rowNodes.length === 1
-          ? containerWidth / 2
-          : ((idx + 1) / (rowNodes.length + 1)) * containerWidth;
-      const y = row * ROW_HEIGHT + ROW_HEIGHT / 2;
+          ? w / 2
+          : ((idx + 1) / (rowNodes.length + 1)) * w;
+      const y = row * rowH + rowH / 2;
       positions[node.taxId] = { x, y };
     });
   }
 
-  const totalHeight = sortedDepths.length * ROW_HEIGHT + ROW_HEIGHT / 2;
-  return { positions, totalHeight };
+  const totalHeight = sortedDepths.length * rowH + rowH / 2;
+  return { positions, totalHeight, totalWidth: w };
 }
 
 // ─── Edges ──────────────────────────────────────────────────────────────────
@@ -366,6 +374,8 @@ export default function PhyloTree() {
   const [containerWidth, setContainerWidth] = useState(0);
   const [newNodeIds, setNewNodeIds] = useState(new Set());
   const [wikiNode, setWikiNode] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const pinchRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -386,73 +396,162 @@ export default function PhyloTree() {
     }
   }, [treeNodes.size]);
 
-  const { positions, totalHeight } = useMemo(
-    () => computeLayout(treeNodes, treeEdges, containerWidth),
-    [treeNodes, treeEdges, containerWidth]
+  const { positions, totalHeight, totalWidth } = useMemo(
+    () => computeLayout(treeNodes, treeEdges, containerWidth, zoom),
+    [treeNodes, treeEdges, containerWidth, zoom]
   );
+
+  const clampZoom = useCallback((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)), []);
+
+  // Ctrl+wheel to zoom on desktop
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom((z) => clampZoom(z * (1 - e.deltaY * 0.002)));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [clampZoom]);
+
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      pinchRef.current = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (e.touches.length !== 2 || pinchRef.current === null) return;
+    const dist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    setZoom((z) => clampZoom(z * (dist / pinchRef.current)));
+    pinchRef.current = dist;
+  };
+
+  const handleTouchEnd = (e) => {
+    if (e.touches.length < 2) pinchRef.current = null;
+  };
 
   const noGuesses = guesses.length === 0;
 
   return (
     <>
-      <Box
-        ref={containerRef}
-        sx={{
-          position: 'relative',
-          width: '100%',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          minHeight: 160,
-          bgcolor: 'background.default',
-          borderRadius: 2,
-          border: '1px solid',
-          borderColor: 'divider',
-        }}
-        aria-label="Phylogenetic tree visualization"
-        role="img"
-      >
-        {noGuesses ? (
+      <Box sx={{ position: 'relative' }}>
+        <Box
+          ref={containerRef}
+          sx={{
+            position: 'relative',
+            width: '100%',
+            overflowY: 'auto',
+            overflowX: 'auto',
+            minHeight: 160,
+            bgcolor: 'background.default',
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: 'divider',
+          }}
+          aria-label="Phylogenetic tree visualization"
+          role="img"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {noGuesses ? (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 160,
+                color: 'text.disabled',
+                px: 2,
+                textAlign: 'center',
+              }}
+            >
+              <Typography variant="body2">
+                Make your first guess to start building the tree!
+              </Typography>
+            </Box>
+          ) : (
+            <Box sx={{ position: 'relative', width: totalWidth, height: totalHeight }}>
+              <Box
+                component="svg"
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  pointerEvents: 'none',
+                }}
+                aria-hidden="true"
+              >
+                <TreeEdges treeEdges={treeEdges} positions={positions} />
+              </Box>
+
+              {Array.from(treeNodes.entries()).map(([taxId, node]) => (
+                <TreeNode
+                  key={taxId}
+                  node={node}
+                  position={positions[taxId]}
+                  isNew={newNodeIds.has(taxId)}
+                  onClick={setWikiNode}
+                />
+              ))}
+            </Box>
+          )}
+        </Box>
+
+        {/* Zoom controls */}
+        {!noGuesses && (
           <Box
             sx={{
+              position: 'absolute',
+              bottom: 8,
+              right: 8,
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: 160,
-              color: 'text.disabled',
-              px: 2,
-              textAlign: 'center',
+              flexDirection: 'column',
+              gap: 0.5,
+              zIndex: 2,
             }}
           >
-            <Typography variant="body2">
-              Make your first guess to start building the tree!
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ position: 'relative', width: '100%', height: totalHeight }}>
-            <Box
-              component="svg"
+            <IconButton
+              size="small"
+              onClick={() => setZoom((z) => clampZoom(z + 0.2))}
+              disabled={zoom >= MAX_ZOOM}
+              aria-label="Zoom in"
               sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                pointerEvents: 'none',
+                width: 28, height: 28,
+                bgcolor: 'background.paper',
+                border: '1px solid',
+                borderColor: 'divider',
+                '&:hover': { bgcolor: 'action.hover' },
               }}
-              aria-hidden="true"
             >
-              <TreeEdges treeEdges={treeEdges} positions={positions} />
-            </Box>
-
-            {Array.from(treeNodes.entries()).map(([taxId, node]) => (
-              <TreeNode
-                key={taxId}
-                node={node}
-                position={positions[taxId]}
-                isNew={newNodeIds.has(taxId)}
-                onClick={setWikiNode}
-              />
-            ))}
+              <AddIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+            <IconButton
+              size="small"
+              onClick={() => setZoom((z) => clampZoom(z - 0.2))}
+              disabled={zoom <= MIN_ZOOM}
+              aria-label="Zoom out"
+              sx={{
+                width: 28, height: 28,
+                bgcolor: 'background.paper',
+                border: '1px solid',
+                borderColor: 'divider',
+                '&:hover': { bgcolor: 'action.hover' },
+              }}
+            >
+              <RemoveIcon sx={{ fontSize: 16 }} />
+            </IconButton>
           </Box>
         )}
       </Box>
