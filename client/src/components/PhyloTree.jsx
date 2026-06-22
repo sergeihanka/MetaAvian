@@ -403,41 +403,55 @@ export default function PhyloTree() {
 
   const clampZoom = useCallback((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)), []);
 
-  // Ctrl+wheel to zoom on desktop
+  // Ctrl+wheel to zoom on desktop, and pinch-to-zoom on mobile.
+  // Both use addEventListener with { passive: false } so preventDefault() works,
+  // which prevents the page from scrolling or browser-zooming during a pinch.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
     const onWheel = (e) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       setZoom((z) => clampZoom(z * (1 - e.deltaY * 0.002)));
     };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [clampZoom]);
 
-  const handleTouchStart = (e) => {
-    if (e.touches.length === 2) {
-      pinchRef.current = Math.hypot(
+    const onTouchStart = (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        pinchRef.current = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+      }
+    };
+
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 2 || pinchRef.current === null) return;
+      e.preventDefault();
+      const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       );
-    }
-  };
+      setZoom((z) => clampZoom(z * (dist / pinchRef.current)));
+      pinchRef.current = dist;
+    };
 
-  const handleTouchMove = (e) => {
-    if (e.touches.length !== 2 || pinchRef.current === null) return;
-    const dist = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    );
-    setZoom((z) => clampZoom(z * (dist / pinchRef.current)));
-    pinchRef.current = dist;
-  };
+    const onTouchEnd = (e) => {
+      if (e.touches.length < 2) pinchRef.current = null;
+    };
 
-  const handleTouchEnd = (e) => {
-    if (e.touches.length < 2) pinchRef.current = null;
-  };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [clampZoom]);
 
   const noGuesses = guesses.length === 0;
 
@@ -459,9 +473,6 @@ export default function PhyloTree() {
           }}
           aria-label="Phylogenetic tree visualization"
           role="img"
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
         >
           {noGuesses ? (
             <Box
