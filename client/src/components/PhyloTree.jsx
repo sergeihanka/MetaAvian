@@ -8,6 +8,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
 import AddIcon from '@mui/icons-material/Add';
@@ -365,6 +367,61 @@ function TreeNode({ node, position, isNew, onClick }) {
   );
 }
 
+// ─── Declutter ───────────────────────────────────────────────────────────────
+// Collapses "passthrough" nodes — internal nodes with exactly one child that
+// are not hints, not leaves, and not the mystery node. Branch points and all
+// meaningful revealed nodes are always kept.
+
+function computeDeclutteredTree(treeNodes, treeEdges) {
+  const childrenOf = new Map();
+  for (const [id] of treeNodes) childrenOf.set(id, []);
+  for (const { parentId, childId } of treeEdges) {
+    if (!childrenOf.has(parentId)) childrenOf.set(parentId, []);
+    childrenOf.get(parentId).push(childId);
+  }
+
+  const isPassthrough = (id) => {
+    const node = treeNodes.get(id);
+    if (!node) return false;
+    if (id === 8782) return false;        // Aves root always shown
+    if (node.isHint) return false;        // hints are meaningful, keep them
+    if (node.isLeaf) return false;        // guess leaves always shown
+    if (node.isMystery) return false;     // mystery always shown
+    return (childrenOf.get(id) || []).length === 1;
+  };
+
+  const filteredNodes = new Map();
+  for (const [id, node] of treeNodes) {
+    if (!isPassthrough(id)) filteredNodes.set(id, node);
+  }
+
+  // For each kept node, skip passthrough nodes to find real children
+  const getNonPassthroughChildren = (id) => {
+    const result = [];
+    const queue = [...(childrenOf.get(id) || [])];
+    while (queue.length > 0) {
+      const cid = queue.shift();
+      if (!isPassthrough(cid)) {
+        result.push(cid);
+      } else {
+        queue.push(...(childrenOf.get(cid) || []));
+      }
+    }
+    return result;
+  };
+
+  const filteredEdges = [];
+  const seen = new Set();
+  for (const [id] of filteredNodes) {
+    for (const childId of getNonPassthroughChildren(id)) {
+      const key = `${id}->${childId}`;
+      if (!seen.has(key)) { seen.add(key); filteredEdges.push({ parentId: id, childId }); }
+    }
+  }
+
+  return { nodes: filteredNodes, edges: filteredEdges };
+}
+
 // ─── PhyloTree ───────────────────────────────────────────────────────────────
 
 export default function PhyloTree() {
@@ -375,6 +432,7 @@ export default function PhyloTree() {
   const [newNodeIds, setNewNodeIds] = useState(new Set());
   const [wikiNode, setWikiNode] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [declutter, setDeclutter] = useState(false);
   const pinchRef = useRef(null);
 
   useEffect(() => {
@@ -396,9 +454,14 @@ export default function PhyloTree() {
     }
   }, [treeNodes.size]);
 
+  const { nodes: displayNodes, edges: displayEdges } = useMemo(() => {
+    if (!declutter) return { nodes: treeNodes, edges: treeEdges };
+    return computeDeclutteredTree(treeNodes, treeEdges);
+  }, [treeNodes, treeEdges, declutter]);
+
   const { positions, totalHeight, totalWidth } = useMemo(
-    () => computeLayout(treeNodes, treeEdges, containerWidth, zoom),
-    [treeNodes, treeEdges, containerWidth, zoom]
+    () => computeLayout(displayNodes, displayEdges, containerWidth, zoom),
+    [displayNodes, displayEdges, containerWidth, zoom]
   );
 
   const clampZoom = useCallback((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)), []);
@@ -457,6 +520,23 @@ export default function PhyloTree() {
 
   return (
     <>
+      {!noGuesses && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={declutter}
+                onChange={(e) => setDeclutter(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={<Typography variant="caption" color="text.secondary">Simplified</Typography>}
+            labelPlacement="start"
+            sx={{ m: 0, gap: 0.5 }}
+          />
+        </Box>
+      )}
       <Box sx={{ position: 'relative' }}>
         <Box
           ref={containerRef}
@@ -504,10 +584,10 @@ export default function PhyloTree() {
                 }}
                 aria-hidden="true"
               >
-                <TreeEdges treeEdges={treeEdges} positions={positions} />
+                <TreeEdges treeEdges={displayEdges} positions={positions} />
               </Box>
 
-              {Array.from(treeNodes.entries()).map(([taxId, node]) => (
+              {Array.from(displayNodes.entries()).map(([taxId, node]) => (
                 <TreeNode
                   key={taxId}
                   node={node}
