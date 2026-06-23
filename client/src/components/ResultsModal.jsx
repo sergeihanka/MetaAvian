@@ -16,6 +16,8 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useGame } from '../context/GameContext.jsx';
 import { TEMPERATURE_EMOJIS } from '../config.js';
 import CountdownTimer from './CountdownTimer.jsx';
+import FeatherToast from './FeatherToast.jsx';
+import BirdUnlockToast from './BirdUnlockToast.jsx';
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -28,6 +30,7 @@ export default function ResultsModal() {
   const {
     showResults, phase, guesses, puzzleNumber, guessLimit,
     hintsUsed = 0, hintPurchasedAt = [],
+    user, pendingBerryAward, pendingBirdUnlock,
   } = state;
   const [snackOpen, setSnackOpen] = useState(false);
 
@@ -49,7 +52,6 @@ export default function ResultsModal() {
     const parts = [];
     let hintPtr = 0;
     for (let g = 0; g <= guesses.length; g++) {
-      // Insert every hint that was purchased after exactly g guesses
       while (hintPtr < hintPurchasedAt.length && hintPurchasedAt[hintPtr] === g) {
         parts.push('❔');
         hintPtr++;
@@ -58,7 +60,6 @@ export default function ResultsModal() {
         parts.push(TEMPERATURE_EMOJIS[guesses[g].feedbackTemperature] || '⬜');
       }
     }
-    // Any hints purchased after the final guess
     while (hintPtr < hintPurchasedAt.length) {
       parts.push('❔');
       hintPtr++;
@@ -215,6 +216,38 @@ export default function ResultsModal() {
             >
               Share
             </Button>
+
+            {isWon && user && pendingBerryAward && (
+              <FeatherToast
+                amount={pendingBerryAward}
+                onDismiss={() => dispatch({ type: 'CLEAR_PENDING_TOASTS' })}
+              />
+            )}
+
+            {isWon && user && pendingBirdUnlock && (
+              <BirdUnlockToast
+                birdName={pendingBirdUnlock.birdName}
+                onDismiss={() => dispatch({ type: 'CLEAR_PENDING_TOASTS' })}
+                onOpenAviary={() => {
+                  dispatch({ type: 'TOGGLE_RESULTS' });
+                  dispatch({ type: 'TOGGLE_AVIARY' });
+                }}
+              />
+            )}
+
+            {isWon && user && (
+              <Button
+                variant="outlined"
+                fullWidth
+                onClick={() => {
+                  dispatch({ type: 'TOGGLE_RESULTS' });
+                  dispatch({ type: 'TOGGLE_AVIARY' });
+                }}
+                aria-label="View your aviary"
+              >
+                View Your Aviary 🐦
+              </Button>
+            )}
 
             <CountdownTimer />
 

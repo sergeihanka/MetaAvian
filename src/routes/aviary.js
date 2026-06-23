@@ -1,0 +1,390 @@
+import { Router } from 'express';
+import NodeCache from 'node-cache';
+import mongoose from 'mongoose';
+import User from '../models/User.js';
+import Bird from '../models/Bird.js';
+import Accessory from '../models/Accessory.js';
+import PortraitJob from '../models/PortraitJob.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
+import {
+  purchaseLimiter,
+  starterLimiter,
+  equipLimiter,
+  aviaryMeLimiter,
+} from '../middleware/rateLimiter.js';
+
+const router = Router();
+const shopCache = new NodeCache({ stdTTL: 3600 });
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/aviary/me
+// Returns full aviary state for the authenticated user.
+// ---------------------------------------------------------------------------
+
+router.get('/me', aviaryMeLimiter, requireAuth, async (req, res) => {
+  const user = await User.findById(req.user.id, {
+    berryBalance: 1,
+    berryLifetime: 1,
+    aviaryBirds: 1,
+    ownedAccessories: 1,
+    birdEquipment: 1,
+    activeBirdId: 1,
+    aviaryStarterPicked: 1,
+    portraitUrls: 1,
+    portraitDirty: 1,
+    portraitJobIds: 1,
+  })
+    .populate('aviaryBirds', 'commonName scientificName iconUrl accentColor wikiTitle order family')
+    .populate('ownedAccessories', 'name slug category cost iconPath fullPath overlayStyle')
+    .lean();
+
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  // Build per-bird portrait map from lean() POJOs
+  const birdPortraits = {};
+  for (const bird of user.aviaryBirds || []) {
+    const id = bird._id.toString();
+    birdPortraits[id] = {
+      url: user.portraitUrls?.[id] ?? null,
+      dirty: user.portraitDirty?.[id] ?? false,
+      jobId: user.portraitJobIds?.[id] ?? null,
+    };
+  }
+
+  res.json({
+    birds: user.aviaryBirds || [],
+    berryBalance: user.berryBalance || 0,
+    berryLifetime: user.berryLifetime || 0,
+    ownedAccessories: user.ownedAccessories || [],
+    birdEquipment: user.birdEquipment || {},
+    birdPortraits,
+    activeBirdId: user.activeBirdId || null,
+    aviaryStarterPicked: user.aviaryStarterPicked || false,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/aviary/birds/starters
+// Returns the 8 starter-eligible birds. No auth required.
+// ---------------------------------------------------------------------------
+
+router.get('/birds/starters', async (req, res) => {
+  const birds = await Bird.find({ isStarterEligible: true, isActive: true })
+    .select('commonName scientificName iconUrl accentColor wikiTitle order family')
+    .lean();
+  res.json({ birds });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/aviary/starter
+// Sets the user's starter bird (one-time action).
+// ---------------------------------------------------------------------------
+
+router.post('/starter', starterLimiter, requireAuth, async (req, res) => {
+  const { birdId } = req.body;
+  if (!birdId || !mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'A valid birdId is required.' });
+  }
+
+  const user = await User.findById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  if (user.aviaryStarterPicked) {
+    return res.status(409).json({ error: 'Starter bird already chosen.' });
+  }
+
+  const bird = await Bird.findOne({ _id: birdId, isStarterEligible: true, isActive: true })
+    .select('commonName scientificName iconUrl accentColor wikiTitle order family')
+    .lean();
+
+  if (!bird) return res.status(404).json({ error: 'Starter bird not found.' });
+
+  user.aviaryBirds = [bird._id];
+  user.activeBirdId = bird._id;
+  user.aviaryStarterPicked = true;
+  await user.save();
+
+  res.json({ bird });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/aviary/birds/:birdId/equip
+// Equip or unequip an accessory on a bird.
+// ---------------------------------------------------------------------------
+
+router.post('/birds/:birdId/equip', equipLimiter, requireAuth, async (req, res) => {
+  const { birdId } = req.params;
+  const { accessoryId } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'Invalid birdId.' });
+  }
+
+  const user = await User.findById(req.user.id, {
+    aviaryBirds: 1,
+    ownedAccessories: 1,
+    birdEquipment: 1,
+    portraitUrls: 1,
+    portraitDirty: 1,
+    portraitJobIds: 1,
+  });
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ownsBird = user.aviaryBirds.map((id) => id.toString()).includes(birdId);
+  if (!ownsBird) return res.status(403).json({ error: 'You do not own this bird.' });
+
+  if (accessoryId === null || accessoryId === undefined) {
+    user.birdEquipment.set(birdId, null);
+  } else {
+    if (!mongoose.Types.ObjectId.isValid(accessoryId)) {
+      return res.status(400).json({ error: 'Invalid accessoryId.' });
+    }
+    const ownsAccessory = user.ownedAccessories.map((id) => id.toString()).includes(accessoryId);
+    if (!ownsAccessory) return res.status(403).json({ error: 'You do not own this accessory.' });
+    user.birdEquipment.set(birdId, accessoryId);
+  }
+
+  // Mark portrait dirty and enqueue generation (deduped)
+  user.portraitDirty.set(birdId, true);
+
+  const existingJobId = user.portraitJobIds.get(birdId);
+  let shouldEnqueue = true;
+
+  if (existingJobId && mongoose.Types.ObjectId.isValid(existingJobId)) {
+    const existingJob = await PortraitJob.findById(existingJobId, 'status').lean();
+    if (existingJob && ['pending', 'processing'].includes(existingJob.status)) {
+      shouldEnqueue = false; // in-flight job will pick up live equippedHatId at run time
+    }
+  }
+
+  if (shouldEnqueue) {
+    const job = await PortraitJob.create({
+      userId: user._id,
+      birdId,
+      hatId: accessoryId || null,
+      status: 'pending',
+      attempts: 0,
+    });
+    user.portraitJobIds.set(birdId, job._id.toString());
+  }
+
+  await user.save();
+
+  const portraitUrl = user.portraitUrls.get(birdId) ?? null;
+  res.json({
+    birdEquipment: Object.fromEntries(user.birdEquipment),
+    portraitDirty: true,
+    portraitUrl,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/aviary/shop
+// Returns all active accessories. Cached for 1 hour.
+// ---------------------------------------------------------------------------
+
+router.get('/shop', async (req, res) => {
+  const cached = shopCache.get('shop');
+  if (cached) return res.json({ accessories: cached });
+
+  const accessories = await Accessory.find({ isActive: true })
+    .sort({ sortOrder: 1 })
+    .lean();
+
+  shopCache.set('shop', accessories);
+  res.json({ accessories });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/aviary/shop/purchase
+// Atomically purchase an accessory using feathers.
+// ---------------------------------------------------------------------------
+
+router.post('/shop/purchase', purchaseLimiter, requireAuth, async (req, res) => {
+  const { accessorySlug } = req.body;
+  if (!accessorySlug) return res.status(400).json({ error: 'accessorySlug is required.' });
+
+  const accessory = await Accessory.findOne({ slug: accessorySlug, isActive: true });
+  if (!accessory) return res.status(404).json({ error: 'Accessory not found.' });
+
+  const updated = await User.findOneAndUpdate(
+    {
+      _id: req.user.id,
+      berryBalance: { $gte: accessory.cost },
+      ownedAccessories: { $nin: [accessory._id] },
+    },
+    {
+      $inc: { berryBalance: -accessory.cost },
+      $push: { ownedAccessories: accessory._id },
+    },
+    { new: true, projection: { berryBalance: 1, ownedAccessories: 1 } }
+  ).populate('ownedAccessories', 'name slug category cost iconPath fullPath overlayStyle');
+
+  if (!updated) {
+    const user = await User.findById(req.user.id, { berryBalance: 1, ownedAccessories: 1 });
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    if (user.ownedAccessories.map((id) => id.toString()).includes(accessory._id.toString())) {
+      return res.status(409).json({ error: 'You already own this accessory.' });
+    }
+    return res.status(400).json({ error: 'Insufficient berries.' });
+  }
+
+  res.json({
+    berryBalance: updated.berryBalance,
+    ownedAccessories: updated.ownedAccessories,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/aviary/feathers
+// Returns berry balance and last 30 history entries.
+// ---------------------------------------------------------------------------
+
+router.get('/feathers', requireAuth, async (req, res) => {
+  const user = await User.findById(req.user.id, {
+    berryBalance: 1,
+    berryHistory: { $slice: -30 },
+  }).lean();
+
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  res.json({
+    berryBalance: user.berryBalance || 0,
+    berryHistory: user.berryHistory || [],
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/aviary/birds/:birdId/info
+// Returns Bird document fields. Client fetches wiki separately.
+// ---------------------------------------------------------------------------
+
+router.get('/birds/:birdId/info', requireAuth, async (req, res) => {
+  const { birdId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'Invalid birdId.' });
+  }
+
+  const user = await User.findById(req.user.id, { aviaryBirds: 1 }).lean();
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ownsBird = user.aviaryBirds.map((id) => id.toString()).includes(birdId);
+  if (!ownsBird) return res.status(403).json({ error: 'You do not own this bird.' });
+
+  const bird = await Bird.findById(birdId)
+    .select('commonName scientificName iconUrl accentColor wikiTitle order family')
+    .lean();
+
+  if (!bird) return res.status(404).json({ error: 'Bird not found.' });
+
+  res.json({ bird });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/aviary/birds/:birdId/portrait
+// Returns current portrait URL and generation status for polling.
+// ---------------------------------------------------------------------------
+
+router.get('/birds/:birdId/portrait', requireAuth, async (req, res) => {
+  const { birdId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'Invalid birdId.' });
+  }
+
+  const user = await User.findById(req.user.id, {
+    aviaryBirds: 1,
+    portraitUrls: 1,
+    portraitDirty: 1,
+    portraitJobIds: 1,
+  }).lean();
+
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ownsBird = user.aviaryBirds.map((id) => id.toString()).includes(birdId);
+  if (!ownsBird) return res.status(403).json({ error: 'You do not own this bird.' });
+
+  const portraitUrl = user.portraitUrls?.[birdId] ?? null;
+  const portraitDirty = user.portraitDirty?.[birdId] ?? false;
+  const portraitJobId = user.portraitJobIds?.[birdId] ?? null;
+
+  let jobStatus = null;
+  if (portraitJobId && mongoose.Types.ObjectId.isValid(portraitJobId)) {
+    const job = await PortraitJob.findById(portraitJobId, 'status').lean();
+    jobStatus = job?.status ?? null;
+  }
+
+  res.json({ portraitUrl, portraitDirty, jobStatus });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/aviary/birds/:birdId/portrait/retry
+// Re-enqueues a failed portrait generation job, resetting attempt count.
+// ---------------------------------------------------------------------------
+
+router.post('/birds/:birdId/portrait/retry', requireAuth, async (req, res) => {
+  const { birdId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'Invalid birdId.' });
+  }
+
+  const user = await User.findById(req.user.id, {
+    aviaryBirds: 1,
+    birdEquipment: 1,
+    portraitUrls: 1,
+    portraitJobIds: 1,
+  });
+
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ownsBird = user.aviaryBirds.map((id) => id.toString()).includes(birdId);
+  if (!ownsBird) return res.status(403).json({ error: 'You do not own this bird.' });
+
+  // Mark any existing job as failed before enqueuing a fresh one
+  const existingJobId = user.portraitJobIds.get(birdId);
+  if (existingJobId && mongoose.Types.ObjectId.isValid(existingJobId)) {
+    await PortraitJob.findByIdAndUpdate(existingJobId, { $set: { status: 'failed' } }).catch(() => {});
+  }
+
+  const hatId = user.birdEquipment?.get(birdId) ?? null;
+  const job = await PortraitJob.create({
+    userId: user._id,
+    birdId,
+    hatId,
+    status: 'pending',
+    attempts: 0,
+  });
+
+  user.portraitDirty.set(birdId, true);
+  user.portraitJobIds.set(birdId, job._id.toString());
+  await user.save();
+
+  const portraitUrl = user.portraitUrls.get(birdId) ?? null;
+  res.json({ portraitUrl, portraitDirty: true, jobStatus: 'pending' });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/aviary/active-bird
+// Sets the user's active (nav avatar) bird.
+// ---------------------------------------------------------------------------
+
+router.post('/active-bird', requireAuth, async (req, res) => {
+  const { birdId } = req.body;
+  if (!birdId || !mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'A valid birdId is required.' });
+  }
+
+  const user = await User.findById(req.user.id, { aviaryBirds: 1 });
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ownsBird = user.aviaryBirds.map((id) => id.toString()).includes(birdId);
+  if (!ownsBird) return res.status(403).json({ error: 'You do not own this bird.' });
+
+  user.activeBirdId = birdId;
+  await user.save();
+
+  res.json({ activeBirdId: birdId });
+});
+
+export default router;

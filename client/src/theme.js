@@ -35,6 +35,26 @@ export const theme = createTheme({
       styleOverrides: {
         root: { borderRadius: 10, fontSize: '13px' },
       },
+      variants: [
+        {
+          props: { variant: 'berry' },
+          style: {
+            backgroundColor: '#FFF8E1',
+            color: '#B8860B',
+            fontWeight: 700,
+            fontSize: '13px',
+            border: '1px solid #B8860B',
+          },
+        },
+      ],
+    },
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        },
+      },
     },
     MuiDialog: {
       styleOverrides: {

@@ -15,6 +15,9 @@ client/dist/
 /tmp/taxdump*
 *.tar.gz
 
+# Generated portrait images (ephemeral — CDN/filesystem, not version controlled)
+portraits/
+
 # OS files
 .DS_Store
 Thumbs.db

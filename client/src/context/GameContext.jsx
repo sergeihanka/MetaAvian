@@ -295,6 +295,27 @@ const initialState = {
   colorblindMode: false,
 
   error: null,
+
+  // Gamification
+  berryBalance: 0,
+  berryLifetime: 0,
+  aviaryBirds: [],
+  ownedAccessories: [],
+  birdEquipment: {},
+  birdPortraits: {},
+  activeBirdId: null,
+  aviaryLoaded: false,
+
+  // UI toggles (gamification)
+  showAviary: false,
+  showBirdViewer: false,
+  viewingBirdId: null,
+  showStarterPicker: false,
+  starterBirds: [],
+
+  // Pending toasts
+  pendingBerryAward: null,
+  pendingBirdUnlock: null,
 };
 
 // ────────────────────────────────────────────────────────────
@@ -450,6 +471,106 @@ function reducer(state, action) {
       return { ...state, error: action.payload };
     case 'CLEAR_ERROR':
       return { ...state, error: null };
+
+    case 'LOAD_AVIARY': {
+      const { birds, berryBalance, berryLifetime, ownedAccessories, birdEquipment, activeBirdId, birdPortraits } = action.payload;
+      return {
+        ...state,
+        aviaryBirds: birds || [],
+        berryBalance: berryBalance || 0,
+        berryLifetime: berryLifetime || 0,
+        ownedAccessories: ownedAccessories || [],
+        birdEquipment: birdEquipment || {},
+        birdPortraits: birdPortraits || {},
+        activeBirdId: activeBirdId || null,
+        aviaryLoaded: true,
+      };
+    }
+
+    case 'SET_BIRD_PORTRAIT': {
+      const { birdId, url, dirty, jobId } = action.payload;
+      return {
+        ...state,
+        birdPortraits: {
+          ...state.birdPortraits,
+          [birdId]: { url: url ?? null, dirty: !!dirty, jobId: jobId ?? null },
+        },
+      };
+    }
+
+    case 'AWARD_BERRIES': {
+      const { amount, newBirdId, birdName } = action.payload;
+      return {
+        ...state,
+        berryBalance: state.berryBalance + (amount || 0),
+        berryLifetime: state.berryLifetime + (amount || 0),
+        pendingBerryAward: amount > 0 ? amount : null,
+        pendingBirdUnlock: newBirdId ? { birdName } : null,
+      };
+    }
+
+    case 'UNLOCK_BIRD': {
+      const bird = action.payload;
+      const alreadyIn = state.aviaryBirds.some((b) => b._id === bird._id);
+      return {
+        ...state,
+        aviaryBirds: alreadyIn ? state.aviaryBirds : [...state.aviaryBirds, bird],
+      };
+    }
+
+    case 'PURCHASE_ACCESSORY': {
+      const { accessory, newBalance } = action.payload;
+      const alreadyOwned = state.ownedAccessories.some((a) => a._id === accessory._id);
+      return {
+        ...state,
+        ownedAccessories: alreadyOwned ? state.ownedAccessories : [...state.ownedAccessories, accessory],
+        berryBalance: newBalance,
+      };
+    }
+
+    case 'EQUIP_ACCESSORY':
+      return {
+        ...state,
+        birdEquipment: { ...state.birdEquipment, [action.payload.birdId]: action.payload.accessoryId },
+      };
+
+    case 'UNEQUIP_ACCESSORY': {
+      const newEquip = { ...state.birdEquipment };
+      newEquip[action.payload.birdId] = null;
+      return { ...state, birdEquipment: newEquip };
+    }
+
+    case 'SET_ACTIVE_BIRD':
+      return { ...state, activeBirdId: action.payload.birdId };
+
+    case 'TOGGLE_AVIARY':
+      return { ...state, showAviary: !state.showAviary };
+
+    case 'OPEN_BIRD_VIEWER':
+      return { ...state, showBirdViewer: true, viewingBirdId: action.payload.birdId };
+
+    case 'CLOSE_BIRD_VIEWER':
+      return { ...state, showBirdViewer: false, viewingBirdId: null };
+
+    case 'SHOW_STARTER_PICKER':
+      return { ...state, showStarterPicker: true };
+
+    case 'LOAD_STARTER_BIRDS':
+      return { ...state, starterBirds: action.payload };
+
+    case 'COMPLETE_STARTER': {
+      const starterBird = action.payload;
+      return {
+        ...state,
+        aviaryBirds: [starterBird],
+        activeBirdId: starterBird._id,
+        showStarterPicker: false,
+        aviaryLoaded: false,
+      };
+    }
+
+    case 'CLEAR_PENDING_TOASTS':
+      return { ...state, pendingBerryAward: null, pendingBirdUnlock: null };
 
     default:
       return state;

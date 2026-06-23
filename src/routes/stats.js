@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import GameSession from '../models/GameSession.js';
+import User from '../models/User.js';
+import DailyPuzzle from '../models/DailyPuzzle.js';
+import { calcBerryAward } from '../services/feathers.js';
 import { optionalAuth, requireAuth } from '../middleware/authMiddleware.js';
 
 function getPuzzleDate() {
@@ -61,12 +64,45 @@ router.post('/session', optionalAuth, async (req, res) => {
   // Read-back verification: confirm the document actually persisted
   const verified = await GameSession.exists({ _id: session._id });
 
+  // Award berries + unlock bird for authenticated users on win
+  let berryAward = 0;
+  let newBirdUnlocked = false;
+
+  if (won && userId) {
+    const user = await User.findById(userId);
+    if (user) {
+      const alreadyAwarded = user.berryHistory.some((h) => h.puzzleDate === puzzleDate);
+      if (!alreadyAwarded) {
+        berryAward = calcBerryAward(Number(guessCount) || normalizedGuesses.length);
+        user.berryBalance += berryAward;
+        user.berryLifetime += berryAward;
+        user.berryHistory.push({ date: new Date(), amount: berryAward, reason: 'puzzle_win', puzzleDate });
+        if (user.berryHistory.length > 90) {
+          user.berryHistory = user.berryHistory.slice(-90);
+        }
+      }
+
+      const puzzle = await DailyPuzzle.findOne({ dateUtc: puzzleDate });
+      if (puzzle?.birdId) {
+        const alreadyOwned = user.aviaryBirds.map((id) => id.toString()).includes(puzzle.birdId.toString());
+        if (!alreadyOwned) {
+          user.aviaryBirds.push(puzzle.birdId);
+          newBirdUnlocked = true;
+        }
+      }
+
+      await user.save();
+    }
+  }
+
   res.json({
     saved: !!verified,
     verified: !!verified,
     sessionId: session._id,
     persistedFor: userId ? 'user' : 'guest',
     userId: session.userId,
+    berryAward,
+    newBirdUnlocked,
   });
 });
 
@@ -130,7 +166,7 @@ router.get('/global', async (req, res) => {
   res.json({
     date,
     totalPlays,
-    winRate: Math.round(winRate * 1000) / 1000, // 3 decimal places
+    winRate: Math.round(winRate * 1000) / 1000,
     avgGuessCount: avgGuessCount !== null ? Math.round(avgGuessCount * 100) / 100 : null,
   });
 });

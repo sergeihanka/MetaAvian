@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 import helmet from 'helmet';
 import cors from 'cors';
 import session from 'express-session';
@@ -17,8 +18,10 @@ import puzzleRouter from './src/routes/puzzle.js';
 import usersRouter from './src/routes/users.js';
 import statsRouter from './src/routes/stats.js';
 import wikiRouter from './src/routes/wiki.js';
+import aviaryRouter from './src/routes/aviary.js';
 import versionRouter from './src/routes/version.js';
 import { appVersionHeader } from './src/middleware/appVersion.js';
+import { startPortraitWorker } from './src/services/portraitWorker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,6 +96,13 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // ---------------------------------------------------------------------------
+// Portrait static files — served with immutable caching (new file per generation)
+// ---------------------------------------------------------------------------
+const portraitsDir = path.join(__dirname, config.portrait.outputDir);
+fs.mkdirSync(portraitsDir, { recursive: true });
+app.use('/portraits', express.static(portraitsDir, { maxAge: '1y', immutable: true }));
+
+// ---------------------------------------------------------------------------
 // Health check (for UptimeRobot)
 // ---------------------------------------------------------------------------
 app.get('/health', (req, res) => {
@@ -112,6 +122,7 @@ app.use('/api/v1/puzzle', puzzleRouter);
 app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/wiki', wikiRouter);
+app.use('/api/v1/aviary', aviaryRouter);
 
 // ---------------------------------------------------------------------------
 // Serve React client in production
@@ -169,6 +180,7 @@ app.use((err, req, res, next) => {
 const PORT = config.port;
 
 connectDB().then(() => {
+  startPortraitWorker();
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} [${config.nodeEnv}]`);
   });

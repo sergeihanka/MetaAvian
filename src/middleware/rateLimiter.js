@@ -47,3 +47,35 @@ export const resendLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many resend requests. Please try again later.' },
 });
+
+export const purchaseLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many purchase requests.' },
+});
+
+export const starterLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many starter bird requests.' },
+});
+
+export const equipLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many equip requests.' },
+});
+
+export const aviaryMeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many aviary requests.' },
+});

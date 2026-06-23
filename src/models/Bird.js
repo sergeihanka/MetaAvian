@@ -12,12 +12,17 @@ const birdSchema = new mongoose.Schema({
   ancestorRanks: [String],    // parallel: rank labels
   isActive: { type: Boolean, default: true },
   imageUrl: String,
+  iconUrl: String,
+  wikiTitle: String,
+  accentColor: String,
+  isStarterEligible: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
 });
 
 birdSchema.index({ ncbiTaxId: 1 }, { unique: true });
 birdSchema.index({ commonName: 'text', commonNameAliases: 'text' });
 birdSchema.index({ isActive: 1 });
+birdSchema.index({ isStarterEligible: 1 });
 
 const Bird = mongoose.model('Bird', birdSchema);
 export default Bird;
