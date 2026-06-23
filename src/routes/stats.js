@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import GameSession from '../models/GameSession.js';
-import { optionalAuth } from '../middleware/authMiddleware.js';
+import { optionalAuth, requireAuth } from '../middleware/authMiddleware.js';
+
+function getPuzzleDate() {
+  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
+}
 
 const router = Router();
 
@@ -13,7 +18,7 @@ const router = Router();
 // ---------------------------------------------------------------------------
 
 router.post('/session', optionalAuth, async (req, res) => {
-  const { puzzleDate, won, guessCount, durationMs, guesses, guestId } = req.body;
+  const { puzzleDate, won, guessCount, durationMs, guesses, guestId, gameState } = req.body;
 
   if (!puzzleDate || !/^\d{4}-\d{2}-\d{2}$/.test(puzzleDate)) {
     return res.status(400).json({ error: 'A valid puzzleDate (YYYY-MM-DD) is required.' });
@@ -44,6 +49,7 @@ router.post('/session', optionalAuth, async (req, res) => {
     guesses: normalizedGuesses,
     completedAt: new Date(),
     durationMs: Number.isFinite(durationMs) ? durationMs : null,
+    ...(gameState && typeof gameState === 'object' ? { gameState } : {}),
   };
 
   const session = await GameSession.findOneAndUpdate(
@@ -62,6 +68,25 @@ router.post('/session', optionalAuth, async (req, res) => {
     persistedFor: userId ? 'user' : 'guest',
     userId: session.userId,
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/stats/session/today
+// Returns the authenticated user's session for today's puzzle, including the
+// full gameState blob so any device can restore a completed game. TTL is
+// implicit: "today" is recomputed on every request using the same 9 AM Central
+// rollover logic used by the puzzle engine.
+// ---------------------------------------------------------------------------
+
+router.get('/session/today', requireAuth, async (req, res) => {
+  const today = getPuzzleDate();
+  const session = await GameSession.findOne(
+    { puzzleDate: today, userId: req.user.id },
+    { gameState: 1, won: 1, guessCount: 1, puzzleDate: 1 }
+  ).lean();
+
+  if (!session) return res.json({ session: null });
+  res.json({ session });
 });
 
 // ---------------------------------------------------------------------------

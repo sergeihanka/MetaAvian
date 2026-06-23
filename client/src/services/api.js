@@ -76,6 +76,11 @@ export function saveGameSession(payload) {
   return request('POST', '/stats/session', payload);
 }
 
+/** Fetch the current user's completed session for today's puzzle (requires auth). */
+export function getTodaySession() {
+  return request('GET', '/stats/session/today');
+}
+
 export function login(email, password) {
   return request('POST', '/auth/login', { email, password });
 }
