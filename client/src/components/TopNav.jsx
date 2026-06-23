@@ -9,6 +9,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import PersonIcon from '@mui/icons-material/Person';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { useGame } from '../context/GameContext.jsx';
+import BerryIcon from './BerryIcon.jsx';
 
 export default function TopNav() {
   const { state, dispatch } = useGame();
@@ -59,7 +60,7 @@ export default function TopNav() {
 
         {user && (
           <Chip
-            label={`🫐 ${berryBalance}`}
+            label={<Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><BerryIcon size={16} /> {berryBalance}</Box>}
             onClick={() => dispatch({ type: 'TOGGLE_AVIARY' })}
             size="small"
             sx={{

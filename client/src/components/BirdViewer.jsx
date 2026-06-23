@@ -17,6 +17,7 @@ import { useGame } from '../context/GameContext.jsx';
 import { getWikiInfo, purchaseAccessory as purchaseAccessoryApi, equipAccessory } from '../services/api.js';
 import BirdIcon from './BirdIcon.jsx';
 import HatShop from './HatShop.jsx';
+import BerryIcon from './BerryIcon.jsx';
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -195,7 +196,7 @@ export default function BirdViewer() {
           <CloseIcon />
         </IconButton>
         <Chip
-          label={`🫐 ${berryBalance}`}
+          label={<Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><BerryIcon size={16} /> {berryBalance}</Box>}
           size="small"
           sx={{ backgroundColor: '#FFF8E1', color: '#B8860B', fontWeight: 700, border: '1px solid #B8860B' }}
           aria-label={`${berryBalance} berries`}

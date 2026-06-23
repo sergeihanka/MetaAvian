@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import BerryIcon from './BerryIcon.jsx';
 
 export default function FeatherToast({ amount, onDismiss }) {
   const [visible, setVisible] = useState(false);
@@ -38,7 +39,7 @@ export default function FeatherToast({ amount, onDismiss }) {
         transition: 'transform 0.6s ease-out, opacity 0.6s ease-out',
       }}
     >
-      <Typography sx={{ fontSize: 20 }} aria-hidden="true">🫐</Typography>
+      <BerryIcon size={24} />
       <Typography sx={{ fontWeight: 700, color: '#169A43', fontSize: '16px' }}>
         +{amount} Berries!
       </Typography>

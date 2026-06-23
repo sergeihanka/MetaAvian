@@ -10,6 +10,7 @@ import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import { getShop } from '../services/api.js';
+import BerryIcon from './BerryIcon.jsx';
 
 export default function HatShop({
   birdId,
@@ -181,9 +182,12 @@ export default function HatShop({
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                       {item.description}
                     </Typography>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#B8860B' }}>
-                      {item.cost} 🫐
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <BerryIcon size={14} />
+                      <Typography variant="caption" sx={{ fontWeight: 700, color: '#B8860B' }}>
+                        {item.cost}
+                      </Typography>
+                    </Box>
                   </Box>
                   {owned ? (
                     <Chip
@@ -219,8 +223,8 @@ export default function HatShop({
       >
         <DialogTitle id="purchase-confirm-title" sx={{ pb: 0.5 }}>Confirm Purchase</DialogTitle>
         <DialogContent>
-          <Typography variant="body1">
-            Spend <strong>{confirmItem?.cost} 🫐</strong> on <strong>{confirmItem?.name}</strong>?
+          <Typography variant="body1" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+            Spend <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, fontWeight: 700 }}><BerryIcon size={16} />{confirmItem?.cost}</Box> on <strong>{confirmItem?.name}</strong>?
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             You have {berryBalance} berries. You&apos;ll have {berryBalance - (confirmItem?.cost || 0)} after.
