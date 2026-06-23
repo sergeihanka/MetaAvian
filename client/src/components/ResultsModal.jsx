@@ -27,7 +27,11 @@ const HINT_COSTS = [3, 4, 5];
 
 export default function ResultsModal() {
   const { state, dispatch } = useGame();
-  const { showResults, phase, guesses, puzzleNumber, guessLimit, hintsUsed = 0, user, pendingBerryAward, pendingBirdUnlock } = state;
+  const {
+    showResults, phase, guesses, puzzleNumber, guessLimit,
+    hintsUsed = 0, hintPurchasedAt = [],
+    user, pendingBerryAward, pendingBirdUnlock,
+  } = state;
   const [snackOpen, setSnackOpen] = useState(false);
 
   const handleClose = () => dispatch({ type: 'TOGGLE_RESULTS' });
@@ -37,13 +41,31 @@ export default function ResultsModal() {
   const correctGuess = guesses.find((g) => g.feedbackTemperature === 'correct');
   const answerBird = correctGuess || lastGuess;
 
-  // One ❔ per hint purchased; effective count adds the guess slots each hint consumed
+  // Effective total: actual guesses + sum of all hint costs
   const totalHintCost = HINT_COSTS.slice(0, hintsUsed).reduce((a, b) => a + b, 0);
-  const hintEmojis = '❔'.repeat(hintsUsed);
-  const guessEmojis = guesses.map((g) => TEMPERATURE_EMOJIS[g.feedbackTemperature] || '⬜').join('');
-  const emojiRow = hintEmojis + guessEmojis;
   const guessCount = guesses.length;
   const effectiveGuesses = guessCount + totalHintCost;
+
+  // Build emoji row: interleave ❔ with guess boxes in the order they occurred.
+  // hintPurchasedAt[i] = guesses.length at the moment hint i was bought.
+  const emojiRow = (() => {
+    const parts = [];
+    let hintPtr = 0;
+    for (let g = 0; g <= guesses.length; g++) {
+      while (hintPtr < hintPurchasedAt.length && hintPurchasedAt[hintPtr] === g) {
+        parts.push('❔');
+        hintPtr++;
+      }
+      if (g < guesses.length) {
+        parts.push(TEMPERATURE_EMOJIS[guesses[g].feedbackTemperature] || '⬜');
+      }
+    }
+    while (hintPtr < hintPurchasedAt.length) {
+      parts.push('❔');
+      hintPtr++;
+    }
+    return parts.join('');
+  })();
 
   const buildShareText = () => {
     const puzzleLabel = puzzleNumber ? `Puzzle #${puzzleNumber}` : 'Daily Puzzle';

@@ -17,6 +17,8 @@ const gameSessionSchema = new mongoose.Schema({
   guessCount: Number,
   completedAt: Date,
   durationMs: Number,
+  // Full client-side state blob — used to restore the game on another device
+  gameState: { type: mongoose.Schema.Types.Mixed, default: null },
 });
 
 gameSessionSchema.index({ puzzleDate: 1, userId: 1 });

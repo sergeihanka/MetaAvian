@@ -9,7 +9,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
 import { useGame, getPuzzleDate, loadGameState } from './context/GameContext.jsx';
-import { getPuzzleToday, getBirds, saveGameSession, getOrCreateGuestId } from './services/api.js';
+import { getPuzzleToday, getBirds, saveGameSession, getTodaySession, getOrCreateGuestId } from './services/api.js';
 import { BIRD_LIST_KEY, BIRD_LIST_DATE_KEY, TOKEN_KEY } from './config.js';
 
 import TopNav from './components/TopNav.jsx';
@@ -154,6 +154,17 @@ export default function App() {
         guessNumber: i + 1,
       })),
       guestId: getOrCreateGuestId(),
+      gameState: {
+        guesses: state.guesses,
+        guessesRemaining: state.guessesRemaining,
+        phase: state.phase,
+        treeNodes: Object.fromEntries(state.treeNodes),
+        treeEdges: state.treeEdges,
+        hintsUsed: state.hintsUsed,
+        hintNodes: state.hintNodes,
+        extraClues: state.extraClues,
+        hintPurchasedAt: state.hintPurchasedAt,
+      },
     })
       .then((res) => {
         // If logged in, confirm the session was attached to the user account
@@ -194,10 +205,27 @@ export default function App() {
           },
         });
 
-        // 2. Restore saved game state for today
-        const savedState = loadGameState(puzzleDate, resetCount);
-        if (savedState && savedState.guesses && savedState.guesses.length > 0) {
-          dispatch({ type: 'RESTORE_GAME_STATE', payload: savedState });
+        // 2. Restore saved game state — prefer server (cross-device sync) over localStorage
+        const activeToken = hashToken || localStorage.getItem(TOKEN_KEY);
+        let restoredFromServer = false;
+
+        if (activeToken && parseJwtUser(activeToken)) {
+          try {
+            const result = await getTodaySession();
+            if (result?.session?.gameState?.guesses?.length > 0) {
+              dispatch({ type: 'RESTORE_GAME_STATE', payload: result.session.gameState });
+              restoredFromServer = true;
+            }
+          } catch {
+            // No server session or auth failed — fall through to localStorage
+          }
+        }
+
+        if (!restoredFromServer) {
+          const savedState = loadGameState(puzzleDate, resetCount);
+          if (savedState?.guesses?.length > 0) {
+            dispatch({ type: 'RESTORE_GAME_STATE', payload: savedState });
+          }
         }
 
         // 3. Load bird list (with cache)

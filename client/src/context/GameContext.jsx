@@ -279,6 +279,7 @@ const initialState = {
   hintsUsed: 0,
   hintNodes: [],
   extraClues: [],
+  hintPurchasedAt: [], // guesses.length at the moment each hint was bought
 
   user: null,
   token: null,
@@ -361,6 +362,7 @@ function reducer(state, action) {
         hintsUsed: saved.hintsUsed || 0,
         hintNodes: saved.hintNodes || [],
         extraClues: saved.extraClues || [],
+        hintPurchasedAt: saved.hintPurchasedAt || [],
       };
     }
 
@@ -418,6 +420,7 @@ function reducer(state, action) {
         ...state,
         hintsUsed: hintIndex + 1,
         hintNodes: newHintNodes,
+        hintPurchasedAt: [...state.hintPurchasedAt, state.guesses.length],
         guessesRemaining: state.guessesRemaining - cost,
         treeNodes,
         treeEdges,
@@ -577,6 +580,7 @@ function persistGameState(state) {
     hintsUsed: state.hintsUsed,
     hintNodes: state.hintNodes,
     extraClues: state.extraClues,
+    hintPurchasedAt: state.hintPurchasedAt,
   };
   try {
     localStorage.setItem(key, JSON.stringify(toSave));
