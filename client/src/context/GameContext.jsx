@@ -302,6 +302,7 @@ const initialState = {
   aviaryBirds: [],
   ownedAccessories: [],
   birdEquipment: {},
+  birdPortraits: {},
   activeBirdId: null,
   aviaryLoaded: false,
 
@@ -472,7 +473,7 @@ function reducer(state, action) {
       return { ...state, error: null };
 
     case 'LOAD_AVIARY': {
-      const { birds, berryBalance, berryLifetime, ownedAccessories, birdEquipment, activeBirdId } = action.payload;
+      const { birds, berryBalance, berryLifetime, ownedAccessories, birdEquipment, activeBirdId, birdPortraits } = action.payload;
       return {
         ...state,
         aviaryBirds: birds || [],
@@ -480,8 +481,20 @@ function reducer(state, action) {
         berryLifetime: berryLifetime || 0,
         ownedAccessories: ownedAccessories || [],
         birdEquipment: birdEquipment || {},
+        birdPortraits: birdPortraits || {},
         activeBirdId: activeBirdId || null,
         aviaryLoaded: true,
+      };
+    }
+
+    case 'SET_BIRD_PORTRAIT': {
+      const { birdId, url, dirty, jobId } = action.payload;
+      return {
+        ...state,
+        birdPortraits: {
+          ...state.birdPortraits,
+          [birdId]: { url: url ?? null, dirty: !!dirty, jobId: jobId ?? null },
+        },
       };
     }
 

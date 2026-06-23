@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -14,7 +15,7 @@ import Alert from '@mui/material/Alert';
 import CloseIcon from '@mui/icons-material/Close';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useGame } from '../context/GameContext.jsx';
-import { getWikiInfo, purchaseAccessory as purchaseAccessoryApi, equipAccessory } from '../services/api.js';
+import { getWikiInfo, purchaseAccessory as purchaseAccessoryApi, equipAccessory, getBirdPortrait, retryBirdPortrait } from '../services/api.js';
 import BirdIcon from './BirdIcon.jsx';
 import HatShop from './HatShop.jsx';
 import BerryIcon from './BerryIcon.jsx';
@@ -102,11 +103,13 @@ function InfoTab({ bird }) {
 
 export default function BirdViewer() {
   const { state, dispatch } = useGame();
-  const { showBirdViewer, viewingBirdId, aviaryBirds, birdEquipment, ownedAccessories, berryBalance } = state;
+  const { showBirdViewer, viewingBirdId, aviaryBirds, birdEquipment, ownedAccessories, berryBalance, birdPortraits } = state;
 
   const [tab, setTab] = useState(0);
   const [birdRotation, setBirdRotation] = useState(0);
   const [shopError, setShopError] = useState(null);
+  const [pollCount, setPollCount] = useState(0);
+  const [pollError, setPollError] = useState(false);
   const stageRef = useRef(null);
 
   const bird = aviaryBirds.find((b) => b._id === viewingBirdId) || null;
@@ -123,6 +126,40 @@ export default function BirdViewer() {
   }, []);
 
   const handleMouseLeave = useCallback(() => setBirdRotation(0), []);
+
+  // Reset poll state when viewed bird changes
+  useEffect(() => {
+    setPollCount(0);
+    setPollError(false);
+  }, [viewingBirdId]);
+
+  // Poll for portrait updates when dirty
+  const portrait = (birdPortraits && birdPortraits[viewingBirdId]) || {};
+  const isDirty = !!portrait.dirty;
+
+  useEffect(() => {
+    if (!isDirty || !viewingBirdId) return;
+    if (pollCount >= 10) { setPollError(true); return; }
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await getBirdPortrait(viewingBirdId);
+        if (!result.portraitDirty && result.portraitUrl) {
+          dispatch({ type: 'SET_BIRD_PORTRAIT', payload: { birdId: viewingBirdId, url: result.portraitUrl, dirty: false, jobId: null } });
+          setPollCount(0);
+          setPollError(false);
+        } else if (result.jobStatus === 'failed') {
+          setPollError(true);
+        } else {
+          setPollCount((c) => c + 1);
+        }
+      } catch {
+        setPollCount((c) => c + 1);
+      }
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [isDirty, pollCount, viewingBirdId, dispatch]);
 
   useEffect(() => {
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -157,6 +194,9 @@ export default function BirdViewer() {
     dispatch({ type: 'EQUIP_ACCESSORY', payload: { birdId, accessoryId } });
     try {
       await equipAccessory(birdId, accessoryId);
+      dispatch({ type: 'SET_BIRD_PORTRAIT', payload: { birdId, url: (birdPortraits[birdId] || {}).url ?? null, dirty: true, jobId: null } });
+      setPollCount(0);
+      setPollError(false);
     } catch {
       dispatch({ type: 'UNEQUIP_ACCESSORY', payload: { birdId } });
     }
@@ -166,6 +206,9 @@ export default function BirdViewer() {
     dispatch({ type: 'UNEQUIP_ACCESSORY', payload: { birdId } });
     try {
       await equipAccessory(birdId, null);
+      dispatch({ type: 'SET_BIRD_PORTRAIT', payload: { birdId, url: (birdPortraits[birdId] || {}).url ?? null, dirty: true, jobId: null } });
+      setPollCount(0);
+      setPollError(false);
     } catch {
       // best-effort
     }
@@ -227,7 +270,42 @@ export default function BirdViewer() {
               transition: 'transform 0.05s ease-out',
             }}
           >
-            <BirdIcon bird={bird} accessory={equippedAccessory} size={180} />
+            {portrait.url ? (
+              <Box sx={{ position: 'relative' }}>
+                <Box
+                  component="img"
+                  src={portrait.url}
+                  alt={bird.commonName}
+                  sx={{ width: 180, height: 180, objectFit: 'contain', borderRadius: 3, display: 'block' }}
+                />
+                {isDirty && !pollError && (
+                  <Chip
+                    label="Updating portrait…"
+                    size="small"
+                    sx={{ position: 'absolute', bottom: -14, left: '50%', transform: 'translateX(-50%)', fontSize: '10px', bgcolor: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                  />
+                )}
+                {pollError && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    sx={{ position: 'absolute', bottom: -14, left: '50%', transform: 'translateX(-50%)', fontSize: '10px', whiteSpace: 'nowrap' }}
+                    onClick={async () => {
+                      try {
+                        await retryBirdPortrait(viewingBirdId);
+                        dispatch({ type: 'SET_BIRD_PORTRAIT', payload: { birdId: viewingBirdId, url: portrait.url, dirty: true, jobId: null } });
+                        setPollCount(0);
+                        setPollError(false);
+                      } catch {}
+                    }}
+                  >
+                    Retry portrait
+                  </Button>
+                )}
+              </Box>
+            ) : (
+              <BirdIcon bird={bird} accessory={equippedAccessory} size={180} />
+            )}
           </Box>
           <Typography variant="h5" component="h2" sx={{ fontWeight: 700, mt: 1 }}>
             {bird.commonName}

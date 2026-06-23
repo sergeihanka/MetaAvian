@@ -48,6 +48,11 @@ const userSchema = new mongoose.Schema({
     reason: String,
     puzzleDate: String,
   }],
+
+  // Portrait generation state — keyed by birdId string
+  portraitUrls: { type: Map, of: String, default: {} },
+  portraitDirty: { type: Map, of: Boolean, default: {} },
+  portraitJobIds: { type: Map, of: String, default: {} },
 });
 
 userSchema.index({ email: 1 }, { unique: true });

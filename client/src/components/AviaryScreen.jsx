@@ -28,6 +28,7 @@ export default function AviaryScreen() {
     aviaryLoaded,
     berryBalance,
     birdEquipment,
+    birdPortraits,
     ownedAccessories,
     user,
   } = state;
@@ -134,6 +135,7 @@ export default function AviaryScreen() {
             {aviaryBirds.map((bird) => {
               const equippedId = birdEquipment[bird._id] || null;
               const equippedAccessory = ownedAccessories.find((a) => a._id === equippedId) || null;
+              const birdPortrait = (birdPortraits && birdPortraits[bird._id]) || null;
               return (
                 <Box key={bird._id} role="listitem">
                   <Card
@@ -144,7 +146,21 @@ export default function AviaryScreen() {
                       aria-label={`View ${bird.commonName}`}
                       sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.75, p: 1.5 }}
                     >
-                      <BirdIcon bird={bird} accessory={equippedAccessory} size={56} />
+                      <Box sx={{ position: 'relative', display: 'inline-block' }}>
+                        {birdPortrait?.url ? (
+                          <Box
+                            component="img"
+                            src={birdPortrait.url}
+                            alt={bird.commonName}
+                            sx={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 2 }}
+                          />
+                        ) : (
+                          <BirdIcon bird={bird} accessory={equippedAccessory} size={56} />
+                        )}
+                        {birdPortrait?.dirty && (
+                          <Box sx={{ position: 'absolute', top: -2, right: -2, width: 8, height: 8, borderRadius: '50%', bgcolor: 'warning.main', border: '1.5px solid #fff' }} />
+                        )}
+                      </Box>
                       <Typography
                         variant="caption"
                         sx={{ fontWeight: 600, textAlign: 'center', lineHeight: 1.2, fontSize: '11px' }}

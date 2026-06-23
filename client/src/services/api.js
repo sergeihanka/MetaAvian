@@ -124,3 +124,5 @@ export const getBirdInfo       = (birdId)                  => request('GET',  `/
 export const getBerryBalance   = ()                        => request('GET',  '/aviary/feathers');
 export const getWikiInfo       = (q)                       => request('GET',  `/wiki?q=${encodeURIComponent(q)}`);
 export const saveSession       = (data)                    => request('POST', '/stats/session', data);
+export const getBirdPortrait   = (birdId)                  => request('GET',  `/aviary/birds/${birdId}/portrait`);
+export const retryBirdPortrait = (birdId)                  => request('POST', `/aviary/birds/${birdId}/portrait/retry`);

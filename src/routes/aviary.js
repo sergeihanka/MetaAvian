@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Bird from '../models/Bird.js';
 import Accessory from '../models/Accessory.js';
+import PortraitJob from '../models/PortraitJob.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
 import {
   purchaseLimiter,
@@ -29,6 +30,9 @@ router.get('/me', aviaryMeLimiter, requireAuth, async (req, res) => {
     birdEquipment: 1,
     activeBirdId: 1,
     aviaryStarterPicked: 1,
+    portraitUrls: 1,
+    portraitDirty: 1,
+    portraitJobIds: 1,
   })
     .populate('aviaryBirds', 'commonName scientificName iconUrl accentColor wikiTitle order family')
     .populate('ownedAccessories', 'name slug category cost iconPath fullPath overlayStyle')
@@ -38,12 +42,24 @@ router.get('/me', aviaryMeLimiter, requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'User not found.' });
   }
 
+  // Build per-bird portrait map from lean() POJOs
+  const birdPortraits = {};
+  for (const bird of user.aviaryBirds || []) {
+    const id = bird._id.toString();
+    birdPortraits[id] = {
+      url: user.portraitUrls?.[id] ?? null,
+      dirty: user.portraitDirty?.[id] ?? false,
+      jobId: user.portraitJobIds?.[id] ?? null,
+    };
+  }
+
   res.json({
     birds: user.aviaryBirds || [],
     berryBalance: user.berryBalance || 0,
     berryLifetime: user.berryLifetime || 0,
     ownedAccessories: user.ownedAccessories || [],
     birdEquipment: user.birdEquipment || {},
+    birdPortraits,
     activeBirdId: user.activeBirdId || null,
     aviaryStarterPicked: user.aviaryStarterPicked || false,
   });
@@ -110,6 +126,9 @@ router.post('/birds/:birdId/equip', equipLimiter, requireAuth, async (req, res) 
     aviaryBirds: 1,
     ownedAccessories: 1,
     birdEquipment: 1,
+    portraitUrls: 1,
+    portraitDirty: 1,
+    portraitJobIds: 1,
   });
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
@@ -127,10 +146,37 @@ router.post('/birds/:birdId/equip', equipLimiter, requireAuth, async (req, res) 
     user.birdEquipment.set(birdId, accessoryId);
   }
 
+  // Mark portrait dirty and enqueue generation (deduped)
+  user.portraitDirty.set(birdId, true);
+
+  const existingJobId = user.portraitJobIds.get(birdId);
+  let shouldEnqueue = true;
+
+  if (existingJobId && mongoose.Types.ObjectId.isValid(existingJobId)) {
+    const existingJob = await PortraitJob.findById(existingJobId, 'status').lean();
+    if (existingJob && ['pending', 'processing'].includes(existingJob.status)) {
+      shouldEnqueue = false; // in-flight job will pick up live equippedHatId at run time
+    }
+  }
+
+  if (shouldEnqueue) {
+    const job = await PortraitJob.create({
+      userId: user._id,
+      birdId,
+      hatId: accessoryId || null,
+      status: 'pending',
+      attempts: 0,
+    });
+    user.portraitJobIds.set(birdId, job._id.toString());
+  }
+
   await user.save();
 
+  const portraitUrl = user.portraitUrls.get(birdId) ?? null;
   res.json({
     birdEquipment: Object.fromEntries(user.birdEquipment),
+    portraitDirty: true,
+    portraitUrl,
   });
 });
 
@@ -234,6 +280,88 @@ router.get('/birds/:birdId/info', requireAuth, async (req, res) => {
   if (!bird) return res.status(404).json({ error: 'Bird not found.' });
 
   res.json({ bird });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/aviary/birds/:birdId/portrait
+// Returns current portrait URL and generation status for polling.
+// ---------------------------------------------------------------------------
+
+router.get('/birds/:birdId/portrait', requireAuth, async (req, res) => {
+  const { birdId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'Invalid birdId.' });
+  }
+
+  const user = await User.findById(req.user.id, {
+    aviaryBirds: 1,
+    portraitUrls: 1,
+    portraitDirty: 1,
+    portraitJobIds: 1,
+  }).lean();
+
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ownsBird = user.aviaryBirds.map((id) => id.toString()).includes(birdId);
+  if (!ownsBird) return res.status(403).json({ error: 'You do not own this bird.' });
+
+  const portraitUrl = user.portraitUrls?.[birdId] ?? null;
+  const portraitDirty = user.portraitDirty?.[birdId] ?? false;
+  const portraitJobId = user.portraitJobIds?.[birdId] ?? null;
+
+  let jobStatus = null;
+  if (portraitJobId && mongoose.Types.ObjectId.isValid(portraitJobId)) {
+    const job = await PortraitJob.findById(portraitJobId, 'status').lean();
+    jobStatus = job?.status ?? null;
+  }
+
+  res.json({ portraitUrl, portraitDirty, jobStatus });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/aviary/birds/:birdId/portrait/retry
+// Re-enqueues a failed portrait generation job, resetting attempt count.
+// ---------------------------------------------------------------------------
+
+router.post('/birds/:birdId/portrait/retry', requireAuth, async (req, res) => {
+  const { birdId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(birdId)) {
+    return res.status(400).json({ error: 'Invalid birdId.' });
+  }
+
+  const user = await User.findById(req.user.id, {
+    aviaryBirds: 1,
+    birdEquipment: 1,
+    portraitUrls: 1,
+    portraitJobIds: 1,
+  });
+
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ownsBird = user.aviaryBirds.map((id) => id.toString()).includes(birdId);
+  if (!ownsBird) return res.status(403).json({ error: 'You do not own this bird.' });
+
+  // Mark any existing job as failed before enqueuing a fresh one
+  const existingJobId = user.portraitJobIds.get(birdId);
+  if (existingJobId && mongoose.Types.ObjectId.isValid(existingJobId)) {
+    await PortraitJob.findByIdAndUpdate(existingJobId, { $set: { status: 'failed' } }).catch(() => {});
+  }
+
+  const hatId = user.birdEquipment?.get(birdId) ?? null;
+  const job = await PortraitJob.create({
+    userId: user._id,
+    birdId,
+    hatId,
+    status: 'pending',
+    attempts: 0,
+  });
+
+  user.portraitDirty.set(birdId, true);
+  user.portraitJobIds.set(birdId, job._id.toString());
+  await user.save();
+
+  const portraitUrl = user.portraitUrls.get(birdId) ?? null;
+  res.json({ portraitUrl, portraitDirty: true, jobStatus: 'pending' });
 });
 
 // ---------------------------------------------------------------------------

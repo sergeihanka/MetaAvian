@@ -27,6 +27,14 @@ const config = {
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   adminSecret: process.env.ADMIN_SECRET,
   isProduction: process.env.NODE_ENV === 'production',
+  portrait: {
+    cmd: process.env.NANO_BANANA_CMD || 'nano-banana',
+    promptFile: process.env.PORTRAIT_PROMPT_FILE || 'prompts/bird-portrait.md',
+    outputDir: process.env.PORTRAITS_DIR || 'portraits',
+    baseUrl: process.env.PORTRAIT_BASE_URL || 'http://localhost:3001',
+    workerIntervalMs: parseInt(process.env.PORTRAIT_WORKER_INTERVAL_MS, 10) || 5000,
+    workerEnabled: process.env.PORTRAIT_WORKER_ENABLED !== 'false',
+  },
 };
 
 // Validate critical vars are present in production

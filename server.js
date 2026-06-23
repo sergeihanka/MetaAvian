@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 import helmet from 'helmet';
 import cors from 'cors';
 import session from 'express-session';
@@ -20,6 +21,7 @@ import wikiRouter from './src/routes/wiki.js';
 import aviaryRouter from './src/routes/aviary.js';
 import versionRouter from './src/routes/version.js';
 import { appVersionHeader } from './src/middleware/appVersion.js';
+import { startPortraitWorker } from './src/services/portraitWorker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,6 +94,13 @@ app.use(
 configurePassport();
 app.use(passport.initialize());
 app.use(passport.session());
+
+// ---------------------------------------------------------------------------
+// Portrait static files — served with immutable caching (new file per generation)
+// ---------------------------------------------------------------------------
+const portraitsDir = path.join(__dirname, config.portrait.outputDir);
+fs.mkdirSync(portraitsDir, { recursive: true });
+app.use('/portraits', express.static(portraitsDir, { maxAge: '1y', immutable: true }));
 
 // ---------------------------------------------------------------------------
 // Health check (for UptimeRobot)
@@ -171,6 +180,7 @@ app.use((err, req, res, next) => {
 const PORT = config.port;
 
 connectDB().then(() => {
+  startPortraitWorker();
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} [${config.nodeEnv}]`);
   });
