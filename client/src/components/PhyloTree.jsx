@@ -21,13 +21,16 @@ const ROW_HEIGHT = 90;
 const MIN_NODE_WIDTH = 120;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 3;
+// Minimum horizontal room each node on a row gets, so crowded rows (many
+// classes/families) spread out and stop overlapping instead of being squeezed
+// into the container width. Rows wider than the container scroll horizontally.
+const NODE_SLOT = MIN_NODE_WIDTH + 50;
 
 // ─── Layout ─────────────────────────────────────────────────────────────────
 
 function computeLayout(treeNodes, treeEdges, containerWidth) {
   if (!containerWidth || treeNodes.size === 0) return { positions: {}, totalHeight: ROW_HEIGHT, totalWidth: containerWidth };
 
-  const w = containerWidth;
   const rowH = ROW_HEIGHT;
 
   // NCBI depths can be large. Compress to sequential display rows.
@@ -42,6 +45,12 @@ function computeLayout(treeNodes, treeEdges, containerWidth) {
     if (!byRow.has(row)) byRow.set(row, []);
     byRow.get(row).push({ taxId, ...node });
   }
+
+  // Width is driven by the busiest row: give every node at least NODE_SLOT of
+  // horizontal space, but never shrink below the visible container width.
+  let maxRowCount = 1;
+  for (const [, rowNodes] of byRow) maxRowCount = Math.max(maxRowCount, rowNodes.length);
+  const w = Math.max(containerWidth, maxRowCount * NODE_SLOT);
 
   const positions = {};
   for (const [row, rowNodes] of byRow) {
@@ -571,6 +580,18 @@ export default function PhyloTree() {
     applyZoom(zoomRef.current + delta);
     setZoom(zoomRef.current);
   };
+
+  // When the layout grows wider than the viewport, center the scroll on the
+  // tree's spine (root, hints and mystery all sit at the horizontal center).
+  // Keyed on base totalWidth only, so committing a zoom never recenters.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const scaledWidth = totalWidth * zoomRef.current;
+    if (scaledWidth > el.clientWidth) {
+      el.scrollLeft = (scaledWidth - el.clientWidth) / 2;
+    }
+  }, [totalWidth]);
 
   const noGuesses = guesses.length === 0;
 
