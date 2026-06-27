@@ -20,7 +20,7 @@ import { TEMPERATURE_COLORS } from '../config.js';
 const ROW_HEIGHT = 90;
 const MIN_NODE_WIDTH = 120;
 const MIN_ZOOM = 0.4;
-const MAX_ZOOM = 3;
+const MAX_ZOOM = 4;
 // Minimum horizontal room each node on a row gets, so crowded rows (many
 // classes/families) spread out and stop overlapping instead of being squeezed
 // into the container width. Rows wider than the container scroll horizontally.
@@ -259,13 +259,20 @@ function TreeNode({ node, position, isNew, onClick }) {
   const isLeaf = node.isLeaf;
   const isClickable = !!(onClick) && !(node.isMystery && !node.isRevealed);
 
+  // Horizontal spread: the node's base x (zoom=1) is pushed to x * zx by the
+  // current zoom factor (--zx, inherited from the layer). The label box itself
+  // is NOT scaled, so zooming pulls crowded nodes apart instead of magnifying.
+  const spread = 'translateX(calc(var(--nx) * (var(--zx, 1) - 1) * 1px))';
+  const entrance = mounted || !isNew ? '' : 'translateY(-20px)';
+
   const chipSx = {
     position: 'absolute',
     left: position.x,
     top: position.y,
-    transform: `translate(-50%, -50%) ${mounted || !isNew ? '' : 'translateY(-20px)'}`,
+    '--nx': position.x,
+    transform: `translate(-50%, -50%) ${spread} ${entrance}`,
     opacity: mounted || !isNew ? 1 : 0,
-    transition: 'opacity 0.3s ease, transform 0.3s ease',
+    transition: 'opacity 0.3s ease, transform var(--tdur, 0.18s) ease-out',
     maxWidth: MIN_NODE_WIDTH + 60,
     cursor: isClickable ? 'pointer' : 'default',
     zIndex: 1,
@@ -446,8 +453,7 @@ export default function PhyloTree() {
   // CSS transform) for native-smooth 60fps pinch, then commits to React state
   // once on touchend so scroll bounds and button state stay consistent.
   const scrollRef = useRef(null);   // scroll container
-  const sizerRef = useRef(null);    // sets the scrollable area (scaled dims)
-  const contentRef = useRef(null);  // transformed inner tree
+  const sizerRef = useRef(null);    // scrollable area; holds --zx spread factor
   const zoomRef = useRef(1);
   const gestureRef = useRef(null);  // { startDist, startZoom } during a pinch
 
@@ -480,13 +486,13 @@ export default function PhyloTree() {
     [displayNodes, displayEdges, containerWidth]
   );
 
-  // Apply a zoom level imperatively to the DOM, keeping a focal point (in client
-  // coords) pinned to the same content pixel. No React render — buttery smooth.
-  const applyZoom = useCallback((nextZoom, focalClientX, focalClientY) => {
+  // Apply a zoom level imperatively to the DOM. Zoom only spreads the tree
+  // HORIZONTALLY (row heights stay fixed), so the focal point is pinned along x
+  // only. No React render — buttery smooth.
+  const applyZoom = useCallback((nextZoom, focalClientX) => {
     const scroller = scrollRef.current;
     const sizer = sizerRef.current;
-    const content = contentRef.current;
-    if (!scroller || !sizer || !content) return;
+    if (!scroller || !sizer) return;
 
     const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom));
     const prevZoom = zoomRef.current;
@@ -494,42 +500,40 @@ export default function PhyloTree() {
 
     // Default focal point = center of the visible viewport
     const fx = focalClientX != null ? focalClientX - rect.left : scroller.clientWidth / 2;
-    const fy = focalClientY != null ? focalClientY - rect.top : scroller.clientHeight / 2;
 
-    // Content-space coordinate under the focal point before scaling
+    // Content-space x under the focal point before scaling
     const contentX = (scroller.scrollLeft + fx) / prevZoom;
-    const contentY = (scroller.scrollTop + fy) / prevZoom;
 
-    // Resize the scrollable area and scale the content
+    // Grow the scrollable area and the spread factor; nodes/edges read --zx
     sizer.style.width = `${totalWidth * z}px`;
-    sizer.style.height = `${totalHeight * z}px`;
-    content.style.transform = `scale(${z})`;
+    sizer.style.setProperty('--zx', z);
 
-    // Re-pin the focal point
+    // Re-pin the focal point horizontally
     scroller.scrollLeft = contentX * z - fx;
-    scroller.scrollTop = contentY * z - fy;
 
     zoomRef.current = z;
     return z;
-  }, [totalWidth, totalHeight]);
+  }, [totalWidth]);
 
   // Ctrl+wheel to zoom on desktop, and pinch-to-zoom on mobile.
   useEffect(() => {
     const el = scrollRef.current;
-    const content = contentRef.current;
     if (!el) return;
+
+    const setInstant = (on) => {
+      const sizer = sizerRef.current;
+      if (sizer) sizer.style.setProperty('--tdur', on ? '0s' : '0.18s');
+    };
 
     const onWheel = (e) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      applyZoom(zoomRef.current * (1 - e.deltaY * 0.002), e.clientX, e.clientY);
+      setInstant(true);
+      applyZoom(zoomRef.current * (1 - e.deltaY * 0.002), e.clientX);
       setZoom(zoomRef.current);
     };
 
-    const midpoint = (t) => ({
-      x: (t[0].clientX + t[1].clientX) / 2,
-      y: (t[0].clientY + t[1].clientY) / 2,
-    });
+    const midpoint = (t) => (t[0].clientX + t[1].clientX) / 2;
     const distance = (t) =>
       Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
 
@@ -540,8 +544,8 @@ export default function PhyloTree() {
           startDist: distance(e.touches),
           startZoom: zoomRef.current,
         };
-        // Disable the CSS transition so the pinch tracks the fingers exactly
-        if (content) content.style.transition = 'none';
+        // Disable transitions so the pinch tracks the fingers exactly
+        setInstant(true);
       }
     };
 
@@ -549,14 +553,13 @@ export default function PhyloTree() {
       if (e.touches.length !== 2 || !gestureRef.current) return;
       e.preventDefault();
       const { startDist, startZoom } = gestureRef.current;
-      const m = midpoint(e.touches);
-      applyZoom(startZoom * (distance(e.touches) / startDist), m.x, m.y);
+      applyZoom(startZoom * (distance(e.touches) / startDist), midpoint(e.touches));
     };
 
     const onTouchEnd = (e) => {
       if (e.touches.length < 2 && gestureRef.current) {
         gestureRef.current = null;
-        if (content) content.style.transition = '';
+        setInstant(false);
         setZoom(zoomRef.current); // commit once
       }
     };
@@ -650,51 +653,46 @@ export default function PhyloTree() {
               </Typography>
             </Box>
           ) : (
-            // Sizer defines the scrollable area (scaled dims); content is the
-            // GPU-composited layer we scale during a pinch.
+            // Sizer is the scrollable area. --zx is the horizontal spread factor
+            // (zoom); nodes read it to push apart, the SVG scales along x to match.
             <Box
               ref={sizerRef}
-              style={{ position: 'relative', width: totalWidth * zoom, height: totalHeight * zoom }}
+              style={{
+                position: 'relative',
+                width: totalWidth * zoom,
+                height: totalHeight,
+                transition: 'width var(--tdur, 0.18s) ease-out',
+                '--zx': zoom,
+                '--tdur': '0.18s',
+              }}
             >
               <Box
-                ref={contentRef}
-                style={{
+                component="svg"
+                sx={{
                   position: 'absolute',
                   top: 0,
                   left: 0,
                   width: totalWidth,
                   height: totalHeight,
                   transformOrigin: '0 0',
-                  transform: `scale(${zoom})`,
-                  transition: 'transform 0.15s ease-out',
-                  willChange: 'transform',
+                  transform: 'scaleX(var(--zx, 1))',
+                  transition: 'transform var(--tdur, 0.18s) ease-out',
+                  pointerEvents: 'none',
                 }}
+                aria-hidden="true"
               >
-                <Box
-                  component="svg"
-                  sx={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    pointerEvents: 'none',
-                  }}
-                  aria-hidden="true"
-                >
-                  <TreeEdges treeEdges={displayEdges} positions={positions} />
-                </Box>
-
-                {Array.from(displayNodes.entries()).map(([taxId, node]) => (
-                  <TreeNode
-                    key={taxId}
-                    node={node}
-                    position={positions[taxId]}
-                    isNew={newNodeIds.has(taxId)}
-                    onClick={setWikiNode}
-                  />
-                ))}
+                <TreeEdges treeEdges={displayEdges} positions={positions} />
               </Box>
+
+              {Array.from(displayNodes.entries()).map(([taxId, node]) => (
+                <TreeNode
+                  key={taxId}
+                  node={node}
+                  position={positions[taxId]}
+                  isNew={newNodeIds.has(taxId)}
+                  onClick={setWikiNode}
+                />
+              ))}
             </Box>
           )}
         </Box>
