@@ -61,10 +61,10 @@ const AVES_ROOT = { taxId: 8782, name: 'Aves', rank: 'class', depth: 0 };
  * form a single chain ordered by depth: the "spine". The mystery hangs off the
  * deepest spine node we know about.
  *
- * Everything else — guess leaves and the genera those guesses belong to — hangs
- * off the spine at the point it diverged, recorded on the node as parentId. A
- * guessed bird's genus is NOT on the mystery's lineage, so it must never join
- * the spine or it would drag the mystery node down a dead-end branch.
+ * Everything else — guess leaves and the eliminated branches they fall in — hangs
+ * off the spine at the point it diverged, recorded on the node as parentId. An
+ * eliminated branch is NOT on the mystery's lineage, so it must never join the
+ * spine or it would drag the mystery node down a dead-end branch.
  *
  * Edges are derived from the node set rather than accumulated, so the tree stays
  * correct no matter what order guesses and hints arrive in.
@@ -157,7 +157,7 @@ function buildTreeUpdate(prevNodes, normalizedGuess) {
     return finalizeTree(nodes);
   }
 
-  const { lca, guessGenus, feedbackTemperature, commonName } = normalizedGuess;
+  const { lca, guessBranch, feedbackTemperature, commonName } = normalizedGuess;
   const lcaTaxId = lca?.taxId;
   const lcaDepth = lca?.depth ?? AVES_ROOT.depth;
 
@@ -179,29 +179,28 @@ function buildTreeUpdate(prevNodes, normalizedGuess) {
     branchDepth = lcaDepth;
   }
 
-  // The guess's own genus, when it lies below the branch point. This is the
-  // level players eliminate at: two wrong guesses in one family are only
-  // distinguishable once their genera are drawn. Guesses sharing a genus reuse
-  // the same node. It is a dead-end branch, never part of the spine.
+  // The eliminated sibling branch: the child of the branch point the guess falls
+  // under. The answer left the branch point by a different child, so this whole
+  // subtree is dead, and no node beneath it would narrow that any further. Its
+  // rank tracks how close the guess landed — a cold guess rules out a superorder,
+  // a guess in the answer's own family rules out only a genus.
   //
-  // Depth is the parent's depth + 1, not the genus's true rank depth. Ancestor
-  // paths vary in length between birds (house sparrow carries an extra rank
-  // above Passer), so raw depths would strand one genus down on the leaf row.
-  // Off-spine nodes only need to render one level below whatever they hang from.
+  // Guesses that fall in the same eliminated branch reuse the node and hang off
+  // it as sibling leaves. It is a dead end, never part of the spine.
   let parentId = branchId;
   let parentDepth = branchDepth;
-  if (guessGenus && guessGenus.taxId !== branchId) {
-    const existing = nodes.get(guessGenus.taxId) || {};
-    nodes.set(guessGenus.taxId, {
+  if (guessBranch && guessBranch.taxId !== branchId) {
+    const existing = nodes.get(guessBranch.taxId) || {};
+    nodes.set(guessBranch.taxId, {
       ...existing,
-      taxId: guessGenus.taxId,
-      name: guessGenus.name,
-      rank: guessGenus.rank,
+      taxId: guessBranch.taxId,
+      name: guessBranch.name,
+      rank: guessBranch.rank,
       depth: branchDepth + 1,
-      isGuessGenus: true,
+      isRuledOut: true,
       parentLcaTaxId: branchId,
     });
-    parentId = guessGenus.taxId;
+    parentId = guessBranch.taxId;
     parentDepth = branchDepth + 1;
   }
 
@@ -352,7 +351,7 @@ function reducer(state, action) {
         commonName: payload.guess?.commonName || '',
         feedbackTemperature: payload.feedbackTemperature || (payload.correct ? 'correct' : 'cold'),
         lca: payload.lca || null,
-        guessGenus: payload.guessGenus || null,
+        guessBranch: payload.guessBranch || null,
         correct: payload.correct || false,
         answer: payload.answer || null,
       };

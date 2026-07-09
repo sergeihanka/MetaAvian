@@ -199,19 +199,24 @@ router.post('/guess', guessLimiter, async (req, res) => {
     }
   }
 
-  // 8. The genus the guess belongs to, when it sits below the branch point.
-  // Players eliminate by genus, so several wrong guesses sharing a family must
-  // be distinguishable — otherwise Melospiza, Passerella and Passerculus all
-  // hang off Passerellidae as indistinguishable leaves. Omitted when the LCA is
-  // already the genus, since that node is on the answer's lineage anyway.
+  // 8. The child of the branch point that the guess sits under. The answer left
+  // the LCA by a different child, so this entire subtree is eliminated — which
+  // makes it the deepest node the guess actually proves anything about. The
+  // guess's genus lies inside it and therefore adds nothing: ruling out Dromaius
+  // when Palaeognathae as a whole is dead tells the player less, not more.
+  // Its rank floats with how close the guess landed — superorder for a cold
+  // guess, genus for one in the answer's own family. Omitted when the next node
+  // is the species itself (a sibling of the answer within one genus), where the
+  // leaf hangs straight off the LCA.
   // This describes the guess only; it leaks nothing about the answer.
-  const genusIndex = guessBird.ancestorRanks.indexOf('genus');
-  const guessGenus =
-    genusIndex > lcaResult.lcaDepth
+  const branchIndex = lcaResult.lcaDepth + 1;
+  const guessBranch =
+    branchIndex < guessBird.ancestorPath.length &&
+    guessBird.ancestorRanks[branchIndex] !== 'species'
       ? {
-          taxId: guessBird.ancestorPath[genusIndex],
-          name: guessBird.ancestorNames[genusIndex],
-          rank: 'genus',
+          taxId: guessBird.ancestorPath[branchIndex],
+          name: guessBird.ancestorNames[branchIndex],
+          rank: guessBird.ancestorRanks[branchIndex],
         }
       : null;
 
@@ -230,7 +235,7 @@ router.post('/guess', guessLimiter, async (req, res) => {
       rank: lcaRank,
       depth: lcaResult.lcaDepth,
     },
-    guessGenus,
+    guessBranch,
     feedbackTemperature: lcaResult.feedbackTemperature,
   });
 });

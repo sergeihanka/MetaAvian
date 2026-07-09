@@ -350,11 +350,12 @@ function TreeNode({ node, position, isNew, onClick }) {
     );
   }
 
-  // ── Internal node: LCA, hint, or a ruled-out genus ──
-  // A guess's genus is a dead end — it is not on the mystery bird's lineage —
-  // so it reads as struck-through rather than as part of the spine.
+  // ── Internal node: LCA, hint, or an eliminated branch ──
+  // An eliminated branch is a dead end — it is not on the mystery bird's lineage
+  // — so it reads as struck-through rather than as part of the spine.
+  // isGuessGenus is the pre-v1.8 flag, still present in saved games in progress.
   const isHint = node.isHint;
-  const isRuledOut = node.isGuessGenus;
+  const isRuledOut = node.isRuledOut || node.isGuessGenus;
   return (
     <Box sx={chipSx} onClick={isClickable ? () => onClick(node) : undefined}>
       <Chip
@@ -420,7 +421,7 @@ function computeDeclutteredTree(treeNodes, treeEdges) {
     if (!node) return false;
     if (id === 8782) return false;        // Aves root always shown
     if (node.isHint) return false;        // hints are meaningful, keep them
-    if (node.isGuessGenus) return false;  // the rank players eliminate at
+    if (node.isRuledOut || node.isGuessGenus) return false; // eliminated branches
     if (node.isLeaf) return false;        // guess leaves always shown
     if (node.isMystery) return false;     // mystery always shown
     return (childrenOf.get(id) || []).length === 1;
