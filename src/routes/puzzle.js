@@ -14,18 +14,42 @@ const cache = new NodeCache();
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Hour (Central Time) at which each new puzzle releases. */
+const RESET_HOUR_CENTRAL = 8;
+
+// Candidate UTC hours for RESET_HOUR_CENTRAL: CDT is UTC−5, CST is UTC−6. We try
+// both and keep whichever actually reads back as the reset hour in Chicago, so
+// DST is handled without hardcoding which offset is in effect.
+const RESET_UTC_HOURS = [RESET_HOUR_CENTRAL + 5, RESET_HOUR_CENTRAL + 6];
+
+const dateHourDtf = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Chicago',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  hour12: false,
+});
+
 /**
  * Returns the current "puzzle date" as YYYY-MM-DD.
- * The puzzle day starts at 9:00 AM Central Time (America/Chicago).
- * Shifting back 9 hours and reading the Central date gives a date that
- * flips exactly at 9 AM Central, handling DST automatically.
+ * The puzzle day starts at RESET_HOUR_CENTRAL (America/Chicago).
+ *
+ * Read the Central wall clock and step back one calendar day when we are before
+ * the reset hour. Do NOT instead subtract RESET_HOUR_CENTRAL hours from the
+ * instant: on DST transition days that window spans the 2 AM jump, so the date
+ * would flip an hour late in spring and an hour early in autumn — drifting out
+ * of step with the countdown, which targets the true reset instant.
  */
 function getPuzzleDate() {
-  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
+  const p = Object.fromEntries(dateHourDtf.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const hour = parseInt(p.hour, 10) % 24;
+  let ms = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
+  if (hour < RESET_HOUR_CENTRAL) ms -= 24 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
-/** Seconds remaining until the next puzzle releases (9:00 AM Central Time). */
+/** Seconds remaining until the next puzzle releases. */
 function secondsUntilNextPuzzle() {
   const now = new Date();
   const hourDtf = new Intl.DateTimeFormat('en-US', {
@@ -39,21 +63,21 @@ function secondsUntilNextPuzzle() {
     parseInt(Object.fromEntries(hourDtf.formatToParts(now).map(p => [p.type, p.value])).hour, 10) % 24;
 
   const targetDateStr =
-    centralHour < 9
+    centralHour < RESET_HOUR_CENTRAL
       ? dateDtf.format(now)
       : dateDtf.format(new Date(now.getTime() + 24 * 60 * 60 * 1000));
 
   const [ty, tm, td] = targetDateStr.split('-').map(Number);
 
-  // Try CDT (UTC−5 → 9 AM = 14:00 UTC) then CST (UTC−6 → 9 AM = 15:00 UTC)
-  for (const utcHour of [14, 15]) {
+  for (const utcHour of RESET_UTC_HOURS) {
     const candidate = new Date(Date.UTC(ty, tm - 1, td, utcHour, 0, 0, 0));
     const cHour =
       parseInt(Object.fromEntries(hourDtf.formatToParts(candidate).map(p => [p.type, p.value])).hour, 10) % 24;
-    if (cHour === 9) return Math.max(0, Math.floor((candidate - now) / 1000));
+    if (cHour === RESET_HOUR_CENTRAL) return Math.max(0, Math.floor((candidate - now) / 1000));
   }
 
-  return Math.max(0, Math.floor((new Date(Date.UTC(ty, tm - 1, td, 15, 0, 0)) - now) / 1000));
+  const fallback = new Date(Date.UTC(ty, tm - 1, td, RESET_UTC_HOURS[1], 0, 0));
+  return Math.max(0, Math.floor((fallback - now) / 1000));
 }
 
 /**
@@ -175,9 +199,23 @@ router.post('/guess', guessLimiter, async (req, res) => {
     }
   }
 
-  // 8. Return wrong-guess response (never include answer bird identity).
-  // The LCA is the point where the guess branches away from the answer — it is
-  // the only internal node the tree needs for a wrong guess.
+  // 8. The genus the guess belongs to, when it sits below the branch point.
+  // Players eliminate by genus, so several wrong guesses sharing a family must
+  // be distinguishable — otherwise Melospiza, Passerella and Passerculus all
+  // hang off Passerellidae as indistinguishable leaves. Omitted when the LCA is
+  // already the genus, since that node is on the answer's lineage anyway.
+  // This describes the guess only; it leaks nothing about the answer.
+  const genusIndex = guessBird.ancestorRanks.indexOf('genus');
+  const guessGenus =
+    genusIndex > lcaResult.lcaDepth
+      ? {
+          taxId: guessBird.ancestorPath[genusIndex],
+          name: guessBird.ancestorNames[genusIndex],
+          rank: 'genus',
+        }
+      : null;
+
+  // 9. Return wrong-guess response (never include answer bird identity).
   res.json({
     correct: false,
     guessNumber: guessNumber ?? null,
@@ -192,6 +230,7 @@ router.post('/guess', guessLimiter, async (req, res) => {
       rank: lcaRank,
       depth: lcaResult.lcaDepth,
     },
+    guessGenus,
     feedbackTemperature: lcaResult.feedbackTemperature,
   });
 });

@@ -206,10 +206,18 @@ export default function App() {
         const activeToken = hashToken || localStorage.getItem(TOKEN_KEY);
         let restoredFromServer = false;
 
+        // A hint can be bought before the first guess, so a save with no guesses
+        // still holds progress the player paid for. Restore on any of it.
+        const hasProgress = (s) =>
+          s?.guesses?.length > 0 ||
+          s?.purchasedHints?.length > 0 ||
+          s?.hintsUsed > 0 ||          // legacy saves
+          s?.extraClues?.length > 0;
+
         if (activeToken && parseJwtUser(activeToken)) {
           try {
             const result = await getTodaySession();
-            if (result?.session?.gameState?.guesses?.length > 0) {
+            if (hasProgress(result?.session?.gameState)) {
               dispatch({ type: 'RESTORE_GAME_STATE', payload: result.session.gameState });
               restoredFromServer = true;
             }
@@ -220,7 +228,7 @@ export default function App() {
 
         if (!restoredFromServer) {
           const savedState = loadGameState(puzzleDate, resetCount);
-          if (savedState?.guesses?.length > 0) {
+          if (hasProgress(savedState)) {
             dispatch({ type: 'RESTORE_GAME_STATE', payload: savedState });
           }
         }

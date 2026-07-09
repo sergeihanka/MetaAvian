@@ -350,19 +350,30 @@ function TreeNode({ node, position, isNew, onClick }) {
     );
   }
 
-  // ── Internal node: LCA or hint ──
+  // ── Internal node: LCA, hint, or a ruled-out genus ──
+  // A guess's genus is a dead end — it is not on the mystery bird's lineage —
+  // so it reads as struck-through rather than as part of the spine.
   const isHint = node.isHint;
+  const isRuledOut = node.isGuessGenus;
   return (
     <Box sx={chipSx} onClick={isClickable ? () => onClick(node) : undefined}>
       <Chip
         label={
           <span>
-            <span style={{ display: 'block', fontWeight: 700, fontSize: '11px', lineHeight: 1.3 }}>
+            <span
+              style={{
+                display: 'block',
+                fontWeight: 700,
+                fontSize: '11px',
+                lineHeight: 1.3,
+                fontStyle: isRuledOut ? 'italic' : 'normal',
+              }}
+            >
               {node.name}
             </span>
             {node.rank && node.rank !== 'unknown' && (
               <span style={{ display: 'block', fontSize: '9px', opacity: 0.75, lineHeight: 1.2 }}>
-                {node.rank}
+                {isRuledOut ? `${node.rank} · ruled out` : node.rank}
               </span>
             )}
           </span>
@@ -375,9 +386,17 @@ function TreeNode({ node, position, isNew, onClick }) {
           height: 'auto',
           borderColor: isHint ? '#169A43' : 'divider',
           borderWidth: isHint ? 2 : 1,
+          ...(isRuledOut && {
+            borderStyle: 'dashed',
+            color: 'text.secondary',
+          }),
           '& .MuiChip-label': { py: 0.5, px: 1, whiteSpace: 'normal' },
         }}
-        aria-label={`${node.rank || 'taxon'}: ${node.name}`}
+        aria-label={
+          isRuledOut
+            ? `Ruled out ${node.rank}: ${node.name}`
+            : `${node.rank || 'taxon'}: ${node.name}`
+        }
       />
     </Box>
   );
@@ -401,6 +420,7 @@ function computeDeclutteredTree(treeNodes, treeEdges) {
     if (!node) return false;
     if (id === 8782) return false;        // Aves root always shown
     if (node.isHint) return false;        // hints are meaningful, keep them
+    if (node.isGuessGenus) return false;  // the rank players eliminate at
     if (node.isLeaf) return false;        // guess leaves always shown
     if (node.isMystery) return false;     // mystery always shown
     return (childrenOf.get(id) || []).length === 1;

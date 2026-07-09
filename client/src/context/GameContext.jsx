@@ -5,6 +5,7 @@ import {
   BIRD_LIST_KEY,
   BIRD_LIST_DATE_KEY,
   GUESS_LIMIT,
+  RESET_HOUR_CENTRAL,
 } from '../config.js';
 
 // ────────────────────────────────────────────────────────────
@@ -20,9 +21,27 @@ function parseJwt(token) {
   }
 }
 
+const dateHourDtf = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Chicago',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  hour12: false,
+});
+
+/**
+ * Current puzzle date (YYYY-MM-DD). Must match getPuzzleDate() on the server —
+ * the guess endpoint rejects any other date. Step back a calendar day before the
+ * reset hour rather than subtracting hours from the instant, which would drift
+ * by an hour on DST transition days.
+ */
 function getPuzzleDate() {
-  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
+  const p = Object.fromEntries(dateHourDtf.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const hour = parseInt(p.hour, 10) % 24;
+  let ms = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
+  if (hour < RESET_HOUR_CENTRAL) ms -= 24 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 function getGameStateKey(date, resetCount) {
@@ -37,14 +56,18 @@ const AVES_ROOT = { taxId: 8782, name: 'Aves', rank: 'class', depth: 0 };
 // ────────────────────────────────────────────────────────────
 
 /**
- * Every internal node we ever place — an LCA (where a wrong guess branched away
- * from the mystery bird) or a purchased hint — sits on the mystery bird's own
- * lineage. So they form a single chain ordered by depth: the "spine".
- *
- * Edges are derived from the node set rather than accumulated, so the spine
- * stays correct no matter what order guesses and hints arrive in. Each guess
- * leaf hangs off the node where it branched away; the mystery hangs off the
+ * An LCA (where a wrong guess branched away from the mystery bird) or a
+ * purchased hint always sits on the mystery bird's own lineage, so together they
+ * form a single chain ordered by depth: the "spine". The mystery hangs off the
  * deepest spine node we know about.
+ *
+ * Everything else — guess leaves and the genera those guesses belong to — hangs
+ * off the spine at the point it diverged, recorded on the node as parentId. A
+ * guessed bird's genus is NOT on the mystery's lineage, so it must never join
+ * the spine or it would drag the mystery node down a dead-end branch.
+ *
+ * Edges are derived from the node set rather than accumulated, so the tree stays
+ * correct no matter what order guesses and hints arrive in.
  */
 function finalizeTree(nodes) {
   const spine = Array.from(nodes.values())
@@ -61,9 +84,8 @@ function finalizeTree(nodes) {
   }
 
   for (const n of nodes.values()) {
-    if (n.isLeaf && !n.isMystery) {
-      edges.push({ parentId: n.parentLcaTaxId ?? AVES_ROOT.taxId, childId: n.taxId });
-    }
+    if (n.isMystery || n.parentLcaTaxId == null) continue;
+    edges.push({ parentId: n.parentLcaTaxId, childId: n.taxId });
   }
 
   const mystery = nodes.get('mystery') || {
@@ -135,7 +157,7 @@ function buildTreeUpdate(prevNodes, normalizedGuess) {
     return finalizeTree(nodes);
   }
 
-  const { lca, feedbackTemperature, commonName } = normalizedGuess;
+  const { lca, guessGenus, feedbackTemperature, commonName } = normalizedGuess;
   const lcaTaxId = lca?.taxId;
   const lcaDepth = lca?.depth ?? AVES_ROOT.depth;
 
@@ -157,16 +179,42 @@ function buildTreeUpdate(prevNodes, normalizedGuess) {
     branchDepth = lcaDepth;
   }
 
+  // The guess's own genus, when it lies below the branch point. This is the
+  // level players eliminate at: two wrong guesses in one family are only
+  // distinguishable once their genera are drawn. Guesses sharing a genus reuse
+  // the same node. It is a dead-end branch, never part of the spine.
+  //
+  // Depth is the parent's depth + 1, not the genus's true rank depth. Ancestor
+  // paths vary in length between birds (house sparrow carries an extra rank
+  // above Passer), so raw depths would strand one genus down on the leaf row.
+  // Off-spine nodes only need to render one level below whatever they hang from.
+  let parentId = branchId;
+  let parentDepth = branchDepth;
+  if (guessGenus && guessGenus.taxId !== branchId) {
+    const existing = nodes.get(guessGenus.taxId) || {};
+    nodes.set(guessGenus.taxId, {
+      ...existing,
+      taxId: guessGenus.taxId,
+      name: guessGenus.name,
+      rank: guessGenus.rank,
+      depth: branchDepth + 1,
+      isGuessGenus: true,
+      parentLcaTaxId: branchId,
+    });
+    parentId = guessGenus.taxId;
+    parentDepth = branchDepth + 1;
+  }
+
   const leafId = `leaf_${commonName}`;
   nodes.set(leafId, {
     taxId: leafId,
     name: commonName,
     commonName,
     rank: 'species',
-    depth: branchDepth + 1,
+    depth: parentDepth + 1,
     isLeaf: true,
     feedbackTemperature,
-    parentLcaTaxId: branchId,
+    parentLcaTaxId: parentId,
   });
 
   return finalizeTree(nodes);
@@ -304,6 +352,7 @@ function reducer(state, action) {
         commonName: payload.guess?.commonName || '',
         feedbackTemperature: payload.feedbackTemperature || (payload.correct ? 'correct' : 'cold'),
         lca: payload.lca || null,
+        guessGenus: payload.guessGenus || null,
         correct: payload.correct || false,
         answer: payload.answer || null,
       };
@@ -463,12 +512,14 @@ export function GameProvider({ children }) {
     }
   }, []);
 
-  // Persist on guess
+  // Persist whenever anything the player spent a guess on changes. Watching only
+  // `guesses` meant buying a hint and reloading before the next guess restored a
+  // stale save: the hint vanished from the tree and its cost was refunded.
   useEffect(() => {
-    if (state.guesses.length > 0 && state.puzzleDate) {
-      persistGameState(state);
-    }
-  }, [state.guesses, state.phase]);
+    if (!state.puzzleDate) return;
+    if (state.guesses.length === 0 && state.purchasedHints.length === 0) return;
+    persistGameState(state);
+  }, [state.guesses, state.phase, state.purchasedHints, state.extraClues]);
 
   return (
     <GameContext.Provider value={{ state, dispatch, loadGameState, getPuzzleDate }}>
