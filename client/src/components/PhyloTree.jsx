@@ -373,7 +373,7 @@ function TreeNode({ node, position, isNew, onClick }) {
             </span>
             {node.rank && node.rank !== 'unknown' && (
               <span style={{ display: 'block', fontSize: '9px', opacity: 0.75, lineHeight: 1.2 }}>
-                {isRuledOut ? `${node.rank} · ruled out` : node.rank}
+                {isRuledOut ? `${node.rank}` : node.rank}
               </span>
             )}
           </span>
