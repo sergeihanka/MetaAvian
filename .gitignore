@@ -1,5 +1,6 @@
 /.claude
 CLAUDE.md
+tmp/
 
 # Dependencies
 node_modules/
