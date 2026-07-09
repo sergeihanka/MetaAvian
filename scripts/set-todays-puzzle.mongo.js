@@ -1,7 +1,7 @@
 // Run with: mongosh YOUR_CONNECTION_STRING scripts/set-todays-puzzle.mongo.js
 
 const today = (() => {
-  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
+  const shifted = new Date(Date.now() - 8 * 60 * 60 * 1000);
   return shifted.toISOString().slice(0, 10);
 })();
 

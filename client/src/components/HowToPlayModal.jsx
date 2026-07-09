@@ -98,7 +98,7 @@ export default function HowToPlayModal() {
           <Divider />
 
           <Typography variant="body2" color="text.secondary">
-            A new bird is revealed every day at 9:00 AM Central Time.
+            A new bird is revealed every day at 8:00 AM Central Time.
           </Typography>
 
           <Typography variant="caption" color="text.disabled">
