@@ -25,8 +25,7 @@ import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import BarChartIcon from "@mui/icons-material/BarChart";
 import EmojiEventsOutlinedIcon from "@mui/icons-material/EmojiEventsOutlined";
 import { useGame } from "../context/GameContext.jsx";
-import { login, register, forgotPassword, resendVerification, getUserStats, cancelRegistration } from "../services/api.js";
-import { GAME_STATE_KEY_PREFIX } from "../config.js";
+import { login, register, forgotPassword, resendVerification, getMyStats, cancelRegistration } from "../services/api.js";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -200,39 +199,7 @@ function PendingVerificationView({ email, onCancelled }) {
   );
 }
 
-// ─── Local stats helper (mirrors StatsScreen logic) ──────────────────────────
-
-function computeLocalStats() {
-  const keys = Object.keys(localStorage).filter((k) => k.startsWith(GAME_STATE_KEY_PREFIX));
-  let played = 0, won = 0, streakCount = 0, maxStreak = 0;
-  let lastDate = null;
-  const sorted = keys
-    .map((k) => ({ date: k.replace(GAME_STATE_KEY_PREFIX, ""), key: k }))
-    .sort((a, b) => (a.date > b.date ? 1 : -1));
-  for (const { date, key } of sorted) {
-    try {
-      const data = JSON.parse(localStorage.getItem(key) || "{}");
-      if (!data.phase || data.phase === "loading" || data.phase === "idle") continue;
-      played++;
-      if (data.phase === "won") {
-        won++;
-        if (lastDate) {
-          const diff = (new Date(date) - new Date(lastDate)) / 86400000;
-          streakCount = diff === 1 ? streakCount + 1 : 1;
-        } else { streakCount = 1; }
-        lastDate = date;
-      } else { streakCount = 0; lastDate = null; }
-      maxStreak = Math.max(maxStreak, streakCount);
-    } catch { /* skip */ }
-  }
-  return {
-    played,
-    won,
-    winRate: played > 0 ? Math.round((won / played) * 100) : 0,
-    currentStreak: streakCount,
-    maxStreak,
-  };
-}
+const EMPTY_STATS = { played: 0, won: 0, winRate: 0, currentStreak: 0, maxStreak: 0 };
 
 // ─── Signed-in view ──────────────────────────────────────────────────────────
 
@@ -248,9 +215,9 @@ function SignedInView({ user, state, dispatch }) {
 
   useEffect(() => {
     setStatsLoading(true);
-    getUserStats()
+    getMyStats()
       .then((data) => setStats(data))
-      .catch(() => setStats(computeLocalStats()))
+      .catch(() => setStats(EMPTY_STATS))
       .finally(() => setStatsLoading(false));
   }, [state.phase]); // re-fetch when a game completes
 

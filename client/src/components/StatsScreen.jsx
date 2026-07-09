@@ -9,81 +9,16 @@ import Divider from '@mui/material/Divider';
 import Slide from '@mui/material/Slide';
 import CloseIcon from '@mui/icons-material/Close';
 import { useGame } from '../context/GameContext.jsx';
-import { GAME_STATE_KEY_PREFIX, GUESS_LIMIT } from '../config.js';
-import { getUserStats } from '../services/api.js';
+import { GUESS_LIMIT } from '../config.js';
+import { getMyStats } from '../services/api.js';
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
 
-function computeLocalStats() {
-  const keys = Object.keys(localStorage).filter((k) =>
-    k.startsWith(GAME_STATE_KEY_PREFIX)
-  );
-
-  let played = 0;
-  let won = 0;
-  let currentStreak = 0;
-  let maxStreak = 0;
-  const distribution = {};
-
-  // Sort by date
-  const sorted = keys
-    .map((k) => ({ date: k.replace(GAME_STATE_KEY_PREFIX, ''), key: k }))
-    .sort((a, b) => (a.date > b.date ? 1 : -1));
-
-  let lastDate = null;
-  let streakCount = 0;
-
-  for (const { date, key } of sorted) {
-    try {
-      const data = JSON.parse(localStorage.getItem(key) || '{}');
-      if (!data.phase || data.phase === 'loading' || data.phase === 'idle') continue;
-      played++;
-      const guessCount = (data.guesses || []).length;
-
-      if (data.phase === 'won') {
-        won++;
-        const bucket = String(guessCount);
-        distribution[bucket] = (distribution[bucket] || 0) + 1;
-
-        // Streak calculation
-        if (lastDate) {
-          const prev = new Date(lastDate);
-          const curr = new Date(date);
-          const diff = (curr - prev) / (1000 * 60 * 60 * 24);
-          if (diff === 1) {
-            streakCount++;
-          } else {
-            streakCount = 1;
-          }
-        } else {
-          streakCount = 1;
-        }
-        lastDate = date;
-      } else {
-        // Lost — break streak
-        distribution['X'] = (distribution['X'] || 0) + 1;
-        streakCount = 0;
-        lastDate = null;
-      }
-
-      maxStreak = Math.max(maxStreak, streakCount);
-    } catch {
-      // malformed data
-    }
-  }
-  currentStreak = streakCount;
-
-  return {
-    played,
-    won,
-    winRate: played > 0 ? Math.round((won / played) * 100) : 0,
-    currentStreak,
-    maxStreak,
-    distribution,
-  };
-}
+const EMPTY_STATS = {
+  played: 0, won: 0, winRate: 0, currentStreak: 0, maxStreak: 0, distribution: {},
+};
 
 function StatBox({ label, value }) {
   return (
@@ -158,18 +93,15 @@ export default function StatsScreen() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // One endpoint for everyone: it keys off the JWT when signed in and the signed
+  // guest cookie otherwise, so a guest's history is as durable as a user's.
   useEffect(() => {
     if (!showStats) return;
-
-    if (user) {
-      setLoading(true);
-      getUserStats()
-        .then((data) => setStats(data))
-        .catch(() => setStats(computeLocalStats()))
-        .finally(() => setLoading(false));
-    } else {
-      setStats(computeLocalStats());
-    }
+    setLoading(true);
+    getMyStats()
+      .then((data) => setStats(data))
+      .catch(() => setStats(EMPTY_STATS))
+      .finally(() => setLoading(false));
   }, [showStats, user, state.phase]);
 
   const handleClose = () => gameDispatch({ type: 'TOGGLE_STATS' });

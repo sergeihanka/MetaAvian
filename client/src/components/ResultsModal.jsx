@@ -25,16 +25,15 @@ export default function ResultsModal() {
   const { state, dispatch } = useGame();
   const {
     showResults, phase, guesses, puzzleNumber, guessLimit, guessesRemaining,
-    hintPurchasedAt = [],
+    hintPurchasedAt = [], answer,
   } = state;
   const [snackOpen, setSnackOpen] = useState(false);
 
   const handleClose = () => dispatch({ type: 'TOGGLE_RESULTS' });
 
-  // Find the correct/answer guess or the last guess
-  const lastGuess = guesses[guesses.length - 1] || null;
-  const correctGuess = guesses.find((g) => g.feedbackTemperature === 'correct');
-  const answerBird = correctGuess || lastGuess;
+  // The server sends the answer once the game is over, win or lose. Falling back
+  // to the last guess would name the player's own wrong bird as the answer.
+  const answerBird = answer || guesses.find((g) => g.correct) || null;
 
   // Everything that costs you — guesses, the specific hints you bought, extra
   // clues — is already deducted from guessesRemaining. Deriving the score from
@@ -167,7 +166,7 @@ export default function ResultsModal() {
                   Today&apos;s bird was:
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                  {answerBird?.answerBirdName || answerBird?.commonName || '—'}
+                  {answerBird?.commonName || '—'}
                 </Typography>
                 {(answerBird?.order || answerBird?.family) && (
                   <Typography variant="body2" color="text.secondary">

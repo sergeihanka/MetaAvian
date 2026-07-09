@@ -46,14 +46,17 @@ export default function GuessInput() {
     setError(null);
 
     try {
-      const result = await submitGuess({
-        puzzleDate,
-        birdCommonName: selectedBird,
-      });
-      dispatch({ type: 'SUBMIT_GUESS', payload: result });
+      const serverState = await submitGuess({ birdCommonName: selectedBird });
+      dispatch({ type: 'SET_SERVER_STATE', payload: serverState });
       setSelectedBird(null);
       setInputValue('');
     } catch (err) {
+      // A rejection still carries the authoritative state (already over, no
+      // guesses left, duplicate bird). Adopt it so the UI stops disagreeing
+      // with the server instead of leaving the player stuck on a stale board.
+      if (err.data?.phase) {
+        dispatch({ type: 'SET_SERVER_STATE', payload: err.data });
+      }
       setError(err.message || 'Failed to submit guess. Please try again.');
     } finally {
       setLoading(false);

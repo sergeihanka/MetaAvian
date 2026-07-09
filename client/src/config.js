@@ -3,7 +3,6 @@ export const GUESS_LIMIT = 25;
 /** Hour (Central Time) at which each new puzzle releases. Must match the server. */
 export const RESET_HOUR_CENTRAL = 8;
 export const TOKEN_KEY = 'aviary_token';
-export const GAME_STATE_KEY_PREFIX = 'aviary_game_';
 export const BIRD_LIST_KEY = 'aviary_bird_list';
 export const BIRD_LIST_DATE_KEY = 'aviary_bird_list_date';
 export const TEMPERATURE_COLORS = {

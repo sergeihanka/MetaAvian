@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -8,8 +8,8 @@ import Button from '@mui/material/Button';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
-import { useGame, getPuzzleDate, loadGameState } from './context/GameContext.jsx';
-import { getPuzzleToday, getBirds, saveGameSession, getTodaySession, getOrCreateGuestId } from './services/api.js';
+import { useGame, getPuzzleDate } from './context/GameContext.jsx';
+import { getGameState, getBirds } from './services/api.js';
 import { BIRD_LIST_KEY, BIRD_LIST_DATE_KEY, TOKEN_KEY } from './config.js';
 
 import TopNav from './components/TopNav.jsx';
@@ -128,57 +128,11 @@ export default function App() {
   const { state, dispatch } = useGame();
   const { phase, error } = state;
 
-  // Persist completed games to aviary.gamesessions. Re-runs (and re-verifies)
-  // if the user logs in after finishing, so the session is attached to their
-  // account. The server upserts, so reloads/replays never create duplicates.
-  const lastSavedRef = useRef('');
-  useEffect(() => {
-    if (phase !== 'won' && phase !== 'lost') return;
-    if (!state.puzzleDate) return;
-
-    const signature = `${state.puzzleDate}|${phase}|${state.user?.id || 'guest'}`;
-    if (lastSavedRef.current === signature) return;
-    lastSavedRef.current = signature;
-
-    saveGameSession({
-      puzzleDate: state.puzzleDate,
-      won: phase === 'won',
-      guessCount: state.guesses.length,
-      guesses: state.guesses.map((g, i) => ({
-        commonName: g.commonName,
-        lcaTaxId: g.lca?.taxId ?? null,
-        lcaName: g.lca?.name ?? null,
-        guessNumber: i + 1,
-      })),
-      guestId: getOrCreateGuestId(),
-      gameState: {
-        guesses: state.guesses,
-        guessesRemaining: state.guessesRemaining,
-        phase: state.phase,
-        treeNodes: Object.fromEntries(state.treeNodes),
-        treeEdges: state.treeEdges,
-        purchasedHints: state.purchasedHints,
-        hintNodes: state.hintNodes,
-        extraClues: state.extraClues,
-        hintPurchasedAt: state.hintPurchasedAt,
-      },
-    })
-      .then((res) => {
-        // If logged in, confirm the session was attached to the user account
-        if (state.user?.id && !res?.userId) {
-          // eslint-disable-next-line no-console
-          console.warn('Game session saved but not linked to user account.');
-        }
-      })
-      .catch(() => {
-        // Allow a retry on the next render / visit
-        lastSavedRef.current = '';
-      });
-  }, [phase, state.puzzleDate, state.user, state.guesses]);
-
   useEffect(() => {
     async function initialize() {
-      // Handle OAuth token in hash
+      // Handle OAuth token in hash. This must happen before the state fetch so
+      // the request carries the token and the server adopts any guest session
+      // this browser started before signing in.
       const hashToken = extractTokenFromHash();
       if (hashToken) {
         const user = parseJwtUser(hashToken);
@@ -188,52 +142,13 @@ export default function App() {
       }
 
       try {
-        // 1. Load puzzle for today
-        const puzzle = await getPuzzleToday();
-        const puzzleDate = puzzle.date || puzzle.puzzleDate;
-        const resetCount = puzzle.resetCount ?? 0;
-        dispatch({
-          type: 'INIT_PUZZLE',
-          payload: {
-            puzzleDate,
-            puzzleNumber: puzzle.puzzleNumber || puzzle.number,
-            guessLimit: puzzle.guessLimit || 20,
-            resetCount,
-          },
-        });
+        // 1. The game, in one call: puzzle metadata plus this player's session.
+        // Identity rides along automatically — the JWT if signed in, otherwise
+        // the signed httpOnly cookie the server sets on first contact.
+        const serverState = await getGameState();
+        dispatch({ type: 'SET_SERVER_STATE', payload: serverState });
 
-        // 2. Restore saved game state — prefer server (cross-device sync) over localStorage
-        const activeToken = hashToken || localStorage.getItem(TOKEN_KEY);
-        let restoredFromServer = false;
-
-        // A hint can be bought before the first guess, so a save with no guesses
-        // still holds progress the player paid for. Restore on any of it.
-        const hasProgress = (s) =>
-          s?.guesses?.length > 0 ||
-          s?.purchasedHints?.length > 0 ||
-          s?.hintsUsed > 0 ||          // legacy saves
-          s?.extraClues?.length > 0;
-
-        if (activeToken && parseJwtUser(activeToken)) {
-          try {
-            const result = await getTodaySession();
-            if (hasProgress(result?.session?.gameState)) {
-              dispatch({ type: 'RESTORE_GAME_STATE', payload: result.session.gameState });
-              restoredFromServer = true;
-            }
-          } catch {
-            // No server session or auth failed — fall through to localStorage
-          }
-        }
-
-        if (!restoredFromServer) {
-          const savedState = loadGameState(puzzleDate, resetCount);
-          if (hasProgress(savedState)) {
-            dispatch({ type: 'RESTORE_GAME_STATE', payload: savedState });
-          }
-        }
-
-        // 3. Load bird list (with cache)
+        // 2. Load bird list (with cache)
         const today = getPuzzleDate();
         const cachedDate = localStorage.getItem(BIRD_LIST_DATE_KEY);
         const cachedList = localStorage.getItem(BIRD_LIST_KEY);
@@ -254,8 +169,8 @@ export default function App() {
           type: 'SET_ERROR',
           payload: err.message || 'Failed to load today\'s puzzle. Please refresh.',
         });
-        // Still transition out of loading even on error
-        dispatch({ type: 'INIT_PUZZLE', payload: { puzzleDate: null, puzzleNumber: null, guessLimit: 20 } });
+        // Leave the loading spinner even on failure, or the app hangs on it
+        dispatch({ type: 'SET_PHASE', payload: 'idle' });
       }
     }
 
