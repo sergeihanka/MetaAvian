@@ -12,6 +12,10 @@ async function request(method, path, body) {
       'Content-Type': 'application/json',
       ...getAuthHeaders(),
     },
+    // Carries the signed httpOnly aviary_sid cookie that identifies a guest's
+    // game session. Without this the server would mint a new guest on every
+    // request and no anonymous game could ever be resumed.
+    credentials: 'include',
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json();
@@ -24,10 +28,6 @@ async function request(method, path, body) {
   return data;
 }
 
-export function getPuzzleToday() {
-  return request('GET', '/puzzle/today');
-}
-
 export function getBirds() {
   return request('GET', '/birds');
 }
@@ -36,16 +36,25 @@ export function searchBirds(q) {
   return request('GET', `/birds/search?q=${encodeURIComponent(q)}`);
 }
 
-export function submitGuess({ puzzleDate, birdCommonName }) {
-  return request('POST', '/puzzle/guess', { puzzleDate, birdCommonName });
+/**
+ * The whole game: puzzle metadata plus this player's server-held session.
+ * The only hydration path — nothing about a game is stored in the browser.
+ */
+export function getGameState() {
+  return request('GET', '/puzzle/state');
 }
 
-export function getHint(level) {
-  return request('GET', `/puzzle/hint?level=${level}`);
+/** Each of these mutates the session server-side and returns the new state. */
+export function submitGuess({ birdCommonName }) {
+  return request('POST', '/puzzle/guess', { birdCommonName });
 }
 
-export function getExtraClue(n) {
-  return request('GET', `/puzzle/extra-clue?n=${n}`);
+export function buyHint(level) {
+  return request('POST', '/puzzle/hint', { level });
+}
+
+export function buyExtraClue() {
+  return request('POST', '/puzzle/extra-clue');
 }
 
 export function getPuzzleResult(date) {
@@ -56,29 +65,9 @@ export function getGlobalStats(date) {
   return request('GET', `/stats/global?date=${encodeURIComponent(date)}`);
 }
 
-const GUEST_ID_KEY = 'aviary_guest_id';
-
-/** Stable per-device id so anonymous game sessions can be deduped server-side. */
-export function getOrCreateGuestId() {
-  let id = localStorage.getItem(GUEST_ID_KEY);
-  if (!id) {
-    id =
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `g_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem(GUEST_ID_KEY, id);
-  }
-  return id;
-}
-
-/** Persist a completed game to aviary.gamesessions (token auto-attached if logged in). */
-export function saveGameSession(payload) {
-  return request('POST', '/stats/session', payload);
-}
-
-/** Fetch the current user's completed session for today's puzzle (requires auth). */
-export function getTodaySession() {
-  return request('GET', '/stats/session/today');
+/** Lifetime stats for the caller — works for guests (cookie) and users (JWT). */
+export function getMyStats() {
+  return request('GET', '/stats/me');
 }
 
 export function login(email, password) {
@@ -87,14 +76,6 @@ export function login(email, password) {
 
 export function register(email, password, firstName, lastName) {
   return request('POST', '/auth/register', { email, password, firstName, lastName });
-}
-
-export function getUserStats() {
-  return request('GET', '/users/me/stats');
-}
-
-export function syncStats(stats) {
-  return request('POST', '/users/me/sync', stats);
 }
 
 export function resendVerification(email) {

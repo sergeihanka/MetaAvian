@@ -5,8 +5,10 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import { useGame } from '../context/GameContext.jsx';
-import { getHint, getExtraClue } from '../services/api.js';
+import { buyHint, buyExtraClue } from '../services/api.js';
 
+// Mirrors src/services/gameRules.js. Used only to label and disable buttons —
+// the server charges the cost and enforces every rule below independently.
 const HINTS = [
   { index: 0, cost: 3, label: 'Order',  rank: 'order'  },
   { index: 1, cost: 4, label: 'Family', rank: 'family' },
@@ -47,17 +49,17 @@ export default function HintBar() {
   // Genus is considered revealed if purchased OR discovered via a hot guess
   const genusRevealed = purchasedHints.includes(2) || isDiscoveredViaGuess('genus', guesses);
 
+  // Both purchases are applied and priced server-side; the response is the new
+  // authoritative session, including the guess budget the cost came out of.
   async function handleHint(hint) {
     if (loading || isGameOver) return;
     setLoading(true);
     try {
-      const data = await getHint(hint.index + 1);
-      dispatch({
-        type: 'REVEAL_HINT',
-        payload: { hintNode: data.hint, hintIndex: hint.index, cost: hint.cost },
-      });
+      const serverState = await buyHint(hint.index + 1);
+      dispatch({ type: 'SET_SERVER_STATE', payload: serverState });
     } catch (err) {
-      console.error('[HintBar] hint fetch failed:', err);
+      if (err.data?.phase) dispatch({ type: 'SET_SERVER_STATE', payload: err.data });
+      console.error('[HintBar] hint purchase failed:', err);
     } finally {
       setLoading(false);
     }
@@ -68,10 +70,11 @@ export default function HintBar() {
     if (guessesRemaining < 3) return;
     setLoading(true);
     try {
-      const data = await getExtraClue(extraClues.length);
-      dispatch({ type: 'REVEAL_EXTRA_CLUE', payload: { clue: data.clue } });
+      const serverState = await buyExtraClue();
+      dispatch({ type: 'SET_SERVER_STATE', payload: serverState });
     } catch (err) {
-      console.error('[HintBar] extra clue fetch failed:', err);
+      if (err.data?.phase) dispatch({ type: 'SET_SERVER_STATE', payload: err.data });
+      console.error('[HintBar] extra clue purchase failed:', err);
     } finally {
       setLoading(false);
     }

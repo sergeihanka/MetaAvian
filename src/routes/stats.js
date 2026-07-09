@@ -1,108 +1,61 @@
 import { Router } from 'express';
 import GameSession from '../models/GameSession.js';
-import { optionalAuth, requireAuth } from '../middleware/authMiddleware.js';
-
-/** Hour (Central Time) at which each new puzzle releases. Must match puzzle.js. */
-const RESET_HOUR_CENTRAL = 8;
-
-const dateHourDtf = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Chicago',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  hour12: false,
-});
-
-/** Current puzzle date (YYYY-MM-DD). Mirrors getPuzzleDate() in puzzle.js. */
-function getPuzzleDate() {
-  const p = Object.fromEntries(dateHourDtf.formatToParts(new Date()).map((x) => [x.type, x.value]));
-  const hour = parseInt(p.hour, 10) % 24;
-  let ms = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
-  if (hour < RESET_HOUR_CENTRAL) ms -= 24 * 60 * 60 * 1000;
-  return new Date(ms).toISOString().slice(0, 10);
-}
+import { optionalAuth } from '../middleware/authMiddleware.js';
+import { playerIdentity } from '../middleware/playerIdentity.js';
 
 const router = Router();
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/stats/session
-// Persist a completed game to aviary.gamesessions. Idempotent per
-// (puzzleDate + user) for logged-in players, or (puzzleDate + guestId) for
-// guests, so replays/reloads update rather than duplicate. The write is
-// read-back verified before responding.
+// GET /api/v1/stats/me
+// Lifetime stats for whoever is calling — a logged-in user keyed by userId, or a
+// guest keyed by their signed cookie. Aggregated live from gamesessions, which
+// is now the only record of a game, so this is correct on every device rather
+// than reflecting whatever one browser happened to keep.
 // ---------------------------------------------------------------------------
 
-router.post('/session', optionalAuth, async (req, res) => {
-  const { puzzleDate, won, guessCount, durationMs, guesses, guestId, gameState } = req.body;
+router.get('/me', optionalAuth, playerIdentity, async (req, res) => {
+  const sessions = await GameSession
+    .find(
+      { ...req.playerFilter, completedAt: { $exists: true } },
+      { won: 1, guessCount: 1, puzzleDate: 1 }
+    )
+    .lean()
+    .sort({ puzzleDate: 1 });
 
-  if (!puzzleDate || !/^\d{4}-\d{2}-\d{2}$/.test(puzzleDate)) {
-    return res.status(400).json({ error: 'A valid puzzleDate (YYYY-MM-DD) is required.' });
+  let played = 0, won = 0, streakCount = 0, maxStreak = 0;
+  const distribution = {};
+  let lastDate = null;
+
+  for (const s of sessions) {
+    played++;
+    if (s.won) {
+      won++;
+      const bucket = String(s.guessCount || 0);
+      distribution[bucket] = (distribution[bucket] || 0) + 1;
+      if (lastDate) {
+        const diff = (new Date(s.puzzleDate) - new Date(lastDate)) / 86400000;
+        streakCount = diff === 1 ? streakCount + 1 : 1;
+      } else {
+        streakCount = 1;
+      }
+      lastDate = s.puzzleDate;
+    } else {
+      distribution['X'] = (distribution['X'] || 0) + 1;
+      streakCount = 0;
+      lastDate = null;
+    }
+    maxStreak = Math.max(maxStreak, streakCount);
   }
-
-  const userId = req.user?.id || null;
-  if (!userId && !guestId) {
-    return res.status(400).json({ error: 'guestId is required for anonymous sessions.' });
-  }
-
-  const filter = userId ? { puzzleDate, userId } : { puzzleDate, guestId };
-
-  const normalizedGuesses = Array.isArray(guesses)
-    ? guesses.slice(0, 30).map((g, i) => ({
-        commonName: g.commonName || '',
-        lcaTaxId: g.lcaTaxId ?? g.lca?.taxId ?? null,
-        lcaName: g.lcaName ?? g.lca?.name ?? null,
-        guessNumber: g.guessNumber ?? i + 1,
-      }))
-    : [];
-
-  const update = {
-    puzzleDate,
-    userId,
-    guestId: userId ? null : guestId,
-    won: !!won,
-    guessCount: Number(guessCount) || normalizedGuesses.length,
-    guesses: normalizedGuesses,
-    completedAt: new Date(),
-    durationMs: Number.isFinite(durationMs) ? durationMs : null,
-    ...(gameState && typeof gameState === 'object' ? { gameState } : {}),
-  };
-
-  const session = await GameSession.findOneAndUpdate(
-    filter,
-    { $set: update },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
-
-  // Read-back verification: confirm the document actually persisted
-  const verified = await GameSession.exists({ _id: session._id });
 
   res.json({
-    saved: !!verified,
-    verified: !!verified,
-    sessionId: session._id,
-    persistedFor: userId ? 'user' : 'guest',
-    userId: session.userId,
+    played,
+    won,
+    winRate: played > 0 ? Math.round((won / played) * 100) : 0,
+    currentStreak: streakCount,
+    maxStreak,
+    distribution,
+    isGuest: !req.user?.id,
   });
-});
-
-// ---------------------------------------------------------------------------
-// GET /api/v1/stats/session/today
-// Returns the authenticated user's session for today's puzzle, including the
-// full gameState blob so any device can restore a completed game. TTL is
-// implicit: "today" is recomputed on every request using the same 8 AM Central
-// rollover logic used by the puzzle engine.
-// ---------------------------------------------------------------------------
-
-router.get('/session/today', requireAuth, async (req, res) => {
-  const today = getPuzzleDate();
-  const session = await GameSession.findOne(
-    { puzzleDate: today, userId: req.user.id },
-    { gameState: 1, won: 1, guessCount: 1, puzzleDate: 1 }
-  ).lean();
-
-  if (!session) return res.json({ session: null });
-  res.json({ session });
 });
 
 // ---------------------------------------------------------------------------

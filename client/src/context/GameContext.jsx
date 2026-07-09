@@ -1,12 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import {
-  TOKEN_KEY,
-  GAME_STATE_KEY_PREFIX,
-  BIRD_LIST_KEY,
-  BIRD_LIST_DATE_KEY,
-  GUESS_LIMIT,
-  RESET_HOUR_CENTRAL,
-} from '../config.js';
+import { TOKEN_KEY, GUESS_LIMIT, RESET_HOUR_CENTRAL } from '../config.js';
 
 // ────────────────────────────────────────────────────────────
 //  Helpers
@@ -42,10 +35,6 @@ function getPuzzleDate() {
   let ms = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
   if (hour < RESET_HOUR_CENTRAL) ms -= 24 * 60 * 60 * 1000;
   return new Date(ms).toISOString().slice(0, 10);
-}
-
-function getGameStateKey(date, resetCount) {
-  return `${GAME_STATE_KEY_PREFIX}${date}_r${resetCount ?? 0}`;
 }
 
 // NCBI Aves root
@@ -232,23 +221,29 @@ function applyHintToTree(prevNodes, newHintNode) {
 }
 
 /**
- * Read hint state from a saved game. Games saved before hints were tracked by
- * index stored `hintsUsed` (a prefix count) and `hintNodes` as a dense array,
- * which could only ever describe hints bought in order — restore them that way.
+ * Derive the whole tree from the server's session.
+ *
+ * The tree is a pure function of the guesses and hints, so it is never stored
+ * or transmitted — replaying the same folds that built it move-by-move
+ * reconstructs it exactly, on any device. finalizeTree derives edges from the
+ * node set rather than accumulating them, so hints and guesses may be replayed
+ * in any order.
  */
-function migrateHintState(saved) {
-  if (Array.isArray(saved.purchasedHints)) {
-    return { purchasedHints: saved.purchasedHints, hintNodes: saved.hintNodes || {} };
+function rebuildTree(guesses = [], hintNodes = {}, answer = null) {
+  let nodes = new Map([[AVES_ROOT.taxId, { ...AVES_ROOT }]]);
+
+  for (const guess of guesses) {
+    // The winning guess needs the answer's lineage to reveal the spine; the
+    // server only sends it once the game is over, which is exactly when it can.
+    const withAnswer = guess.correct ? { ...guess, answer } : guess;
+    ({ treeNodes: nodes } = buildTreeUpdate(nodes, withAnswer));
   }
-  const legacyNodes = Array.isArray(saved.hintNodes) ? saved.hintNodes : [];
-  const count = saved.hintsUsed || 0;
-  const purchasedHints = [];
-  const hintNodes = {};
-  for (let i = 0; i < count; i++) {
-    purchasedHints.push(i);
-    if (legacyNodes[i]) hintNodes[i] = legacyNodes[i];
+
+  for (const node of Object.values(hintNodes)) {
+    if (node) ({ treeNodes: nodes } = applyHintToTree(nodes, node));
   }
-  return { purchasedHints, hintNodes };
+
+  return finalizeTree(nodes);
 }
 
 // ────────────────────────────────────────────────────────────
@@ -280,6 +275,10 @@ const initialState = {
   extraClues: [],
   hintPurchasedAt: [], // guesses.length at the moment each hint was bought
 
+  // The answer bird. Sent by the server only once the game is over, so it can
+  // never be read out of the client before it has been earned.
+  answer: null,
+
   user: null,
   token: null,
 
@@ -302,109 +301,45 @@ const initialState = {
 
 function reducer(state, action) {
   switch (action.type) {
-    case 'INIT_PUZZLE': {
-      return {
-        ...state,
-        puzzleDate: action.payload.puzzleDate,
-        puzzleNumber: action.payload.puzzleNumber,
-        resetCount: action.payload.resetCount ?? 0,
-        guessLimit: action.payload.guessLimit || GUESS_LIMIT,
-        guessesRemaining: action.payload.guessLimit || GUESS_LIMIT,
-        phase: 'idle',
-        error: null,
-      };
-    }
-
     case 'LOAD_BIRD_LIST': {
       return { ...state, birdList: action.payload };
     }
 
-    case 'RESTORE_GAME_STATE': {
-      const saved = action.payload;
-      const restoredNodes = new Map([[AVES_ROOT.taxId, { ...AVES_ROOT }]]);
-      if (saved.treeNodes) {
-        for (const [k, v] of Object.entries(saved.treeNodes)) {
-          // Keys may be numeric tax IDs or string leaf IDs
-          const key = isNaN(k) ? k : Number(k);
-          restoredNodes.set(key, v);
-        }
-      }
-      return {
-        ...state,
-        guesses: saved.guesses || [],
-        guessesRemaining:
-          saved.guessesRemaining != null ? saved.guessesRemaining : GUESS_LIMIT,
-        phase: saved.phase || 'idle',
-        treeNodes: restoredNodes,
-        treeEdges: saved.treeEdges || [],
-        showResults: saved.phase === 'won' || saved.phase === 'lost',
-        ...migrateHintState(saved),
-        extraClues: saved.extraClues || [],
-        hintPurchasedAt: saved.hintPurchasedAt || [],
-      };
-    }
-
-    case 'SUBMIT_GUESS': {
-      const payload = action.payload;
-      // Normalize API response: flatten guess.guess.commonName → guess.commonName
-      const guess = {
-        commonName: payload.guess?.commonName || '',
-        feedbackTemperature: payload.feedbackTemperature || (payload.correct ? 'correct' : 'cold'),
-        lca: payload.lca || null,
-        guessBranch: payload.guessBranch || null,
-        correct: payload.correct || false,
-        answer: payload.answer || null,
-      };
-
-      const newGuesses = [...state.guesses, guess];
-      const newGuessesRemaining = state.guessesRemaining - 1;
-
-      const { treeNodes, treeEdges } = buildTreeUpdate(state.treeNodes, guess);
-
-      let phase = 'playing';
-      let showResults = state.showResults;
-
-      if (guess.correct || guess.feedbackTemperature === 'correct') {
-        phase = 'won';
-        showResults = true;
-      } else if (newGuessesRemaining <= 0) {
-        phase = 'lost';
-        showResults = true;
-      }
+    /**
+     * Adopt the server's session wholesale. Every mutating endpoint returns the
+     * full state, so hydrating on load, guessing, buying a hint and buying a
+     * clue all land here — there is exactly one way for the game to change, and
+     * it is whatever the server says. The client never computes a score, a
+     * remaining-guess count, or a phase for itself.
+     */
+    case 'SET_SERVER_STATE': {
+      const s = action.payload;
+      const { treeNodes, treeEdges } = rebuildTree(s.guesses, s.hintNodes, s.answer);
+      const finished = s.phase === 'won' || s.phase === 'lost';
 
       return {
         ...state,
-        guesses: newGuesses,
-        guessesRemaining: newGuessesRemaining,
-        phase,
+        puzzleDate: s.puzzleDate ?? state.puzzleDate,
+        puzzleNumber: s.puzzleNumber ?? state.puzzleNumber,
+        resetCount: s.resetCount ?? state.resetCount,
+        guessLimit: s.guessLimit ?? state.guessLimit,
+
+        phase: s.phase,
+        guesses: s.guesses ?? [],
+        guessesRemaining: s.guessesRemaining,
+        purchasedHints: s.purchasedHints ?? [],
+        hintNodes: s.hintNodes ?? {},
+        hintPurchasedAt: s.hintPurchasedAt ?? [],
+        extraClues: s.extraClues ?? [],
+        answer: s.answer ?? null,
+
         treeNodes,
         treeEdges,
-        showResults,
+
+        // Pop the results the moment the game ends, but never re-open a modal
+        // the player has already dismissed on a later refresh of the state.
+        showResults: finished && !state.answer ? true : state.showResults,
         error: null,
-      };
-    }
-
-    case 'REVEAL_HINT': {
-      const { hintNode, hintIndex, cost } = action.payload;
-      if (state.purchasedHints.includes(hintIndex)) return state;
-
-      const { treeNodes, treeEdges } = applyHintToTree(state.treeNodes, hintNode);
-      return {
-        ...state,
-        purchasedHints: [...state.purchasedHints, hintIndex].sort((a, b) => a - b),
-        hintNodes: { ...state.hintNodes, [hintIndex]: hintNode },
-        hintPurchasedAt: [...state.hintPurchasedAt, state.guesses.length],
-        guessesRemaining: state.guessesRemaining - cost,
-        treeNodes,
-        treeEdges,
-      };
-    }
-
-    case 'REVEAL_EXTRA_CLUE': {
-      return {
-        ...state,
-        extraClues: [...state.extraClues, action.payload.clue],
-        guessesRemaining: state.guessesRemaining - 3,
       };
     }
 
@@ -439,6 +374,9 @@ function reducer(state, action) {
     case 'SET_COLORBLIND_MODE':
       return { ...state, colorblindMode: action.payload };
 
+    case 'SET_PHASE':
+      return { ...state, phase: action.payload };
+
     case 'SET_ERROR':
       return { ...state, error: action.payload };
     case 'CLEAR_ERROR':
@@ -446,40 +384,6 @@ function reducer(state, action) {
 
     default:
       return state;
-  }
-}
-
-// ────────────────────────────────────────────────────────────
-//  Persistence
-// ────────────────────────────────────────────────────────────
-
-function persistGameState(state) {
-  if (!state.puzzleDate) return;
-  const key = getGameStateKey(state.puzzleDate, state.resetCount);
-  const toSave = {
-    guesses: state.guesses,
-    guessesRemaining: state.guessesRemaining,
-    phase: state.phase,
-    treeNodes: Object.fromEntries(state.treeNodes),
-    treeEdges: state.treeEdges,
-    purchasedHints: state.purchasedHints,
-    hintNodes: state.hintNodes,
-    extraClues: state.extraClues,
-    hintPurchasedAt: state.hintPurchasedAt,
-  };
-  try {
-    localStorage.setItem(key, JSON.stringify(toSave));
-  } catch {
-    // localStorage may be full
-  }
-}
-
-function loadGameState(date, resetCount) {
-  try {
-    const raw = localStorage.getItem(getGameStateKey(date, resetCount));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
   }
 }
 
@@ -511,17 +415,11 @@ export function GameProvider({ children }) {
     }
   }, []);
 
-  // Persist whenever anything the player spent a guess on changes. Watching only
-  // `guesses` meant buying a hint and reloading before the next guess restored a
-  // stale save: the hint vanished from the tree and its cost was refunded.
-  useEffect(() => {
-    if (!state.puzzleDate) return;
-    if (state.guesses.length === 0 && state.purchasedHints.length === 0) return;
-    persistGameState(state);
-  }, [state.guesses, state.phase, state.purchasedHints, state.extraClues]);
+  // No game state is persisted here. Every guess, hint and clue is written to
+  // Mongo by the endpoint that applied it, and GET /puzzle/state replays it.
 
   return (
-    <GameContext.Provider value={{ state, dispatch, loadGameState, getPuzzleDate }}>
+    <GameContext.Provider value={{ state, dispatch, getPuzzleDate }}>
       {children}
     </GameContext.Provider>
   );
@@ -533,4 +431,4 @@ export function useGame() {
   return ctx;
 }
 
-export { getPuzzleDate, loadGameState };
+export { getPuzzleDate };

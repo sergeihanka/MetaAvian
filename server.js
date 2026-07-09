@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import helmet from 'helmet';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import passport from 'passport';
 
@@ -67,6 +68,11 @@ app.use(
 // ---------------------------------------------------------------------------
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// ---------------------------------------------------------------------------
+// Cookies — signed, so the guest player id in aviary_sid cannot be forged
+// ---------------------------------------------------------------------------
+app.use(cookieParser(config.sessionSecret || 'dev-session-secret'));
 
 // ---------------------------------------------------------------------------
 // Session (only needed for OAuth2 round-trip — short-lived)

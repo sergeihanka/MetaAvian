@@ -2,13 +2,30 @@ import { Router } from 'express';
 import NodeCache from 'node-cache';
 import Bird from '../models/Bird.js';
 import DailyPuzzle from '../models/DailyPuzzle.js';
+import GameSession from '../models/GameSession.js';
 import TaxonomyNode from '../models/TaxonomyNode.js';
 import { computeGuessResult } from '../services/lca.js';
+import {
+  GUESS_LIMIT,
+  HINT_COSTS,
+  HINT_RANKS,
+  EXTRA_CLUE_COST,
+  arePrerequisitesMet,
+  isDiscoveredViaGuess,
+  isGenusRevealed,
+  guessesRemaining,
+  serializeSession,
+} from '../services/gameRules.js';
 import { guessLimiter } from '../middleware/rateLimiter.js';
+import { optionalAuth } from '../middleware/authMiddleware.js';
+import { playerIdentity } from '../middleware/playerIdentity.js';
 import config from '../config/index.js';
 
 const router = Router();
 const cache = new NodeCache();
+
+/** Identify the player on every route below. optionalAuth must precede it. */
+const identify = [optionalAuth, playerIdentity];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -106,9 +123,81 @@ async function getTodayPuzzle() {
   return puzzle;
 }
 
+/**
+ * Load this player's session for the current puzzle attempt, creating it on
+ * first contact. resetCount is part of the identity, so an admin reset leaves
+ * the old row untouched for history and starts everyone on a fresh one.
+ *
+ * A guest who signs in mid-game has their cookie-keyed session adopted onto
+ * their account, so logging in never loses progress. The adoption is a
+ * conditional update rather than a read-then-write: two tabs racing to adopt
+ * the same guest row would otherwise both succeed and duplicate it.
+ */
+async function loadOrCreateSession(req, puzzle) {
+  const puzzleDate = puzzle.dateUtc;
+  const resetCount = puzzle.resetCount ?? 0;
+  const base = { puzzleDate, resetCount };
+  const userId = req.user?.id || null;
+
+  if (userId) {
+    const existing = await GameSession.findOne({ ...base, userId });
+    if (existing) return existing;
+
+    const adopted = await GameSession.findOneAndUpdate(
+      { ...base, guestId: req.guestId, userId: null },
+      { $set: { userId, guestId: null } },
+      { new: true }
+    );
+    if (adopted) return adopted;
+
+    return GameSession.create({ ...base, userId, guestId: null });
+  }
+
+  const existing = await GameSession.findOne({ ...base, guestId: req.guestId, userId: null });
+  if (existing) return existing;
+  return GameSession.create({ ...base, guestId: req.guestId, userId: null });
+}
+
+/** The answer, revealed only once the game is over. */
+function answerPayload(bird) {
+  return {
+    commonName: bird.commonName,
+    scientificName: bird.scientificName,
+    order: bird.order,
+    family: bird.family,
+    ncbiUrl: `https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=${bird.ncbiTaxId}`,
+    ancestorPath: bird.ancestorPath,
+    ancestorNames: bird.ancestorNames,
+    ancestorRanks: bird.ancestorRanks,
+  };
+}
+
+/** Full client payload: puzzle meta + session, plus the answer iff finished. */
+function statePayload(puzzle, session) {
+  const finished = session.phase === 'won' || session.phase === 'lost';
+  return {
+    puzzleDate: puzzle.dateUtc,
+    puzzleNumber: puzzle.puzzleNumber,
+    resetCount: puzzle.resetCount ?? 0,
+    ...serializeSession(session),
+    ...(finished ? { answer: answerPayload(puzzle.birdId) } : {}),
+  };
+}
+
+/** Mark a finished game once, so completedAt reflects the deciding move. */
+function finish(session, won) {
+  session.phase = won ? 'won' : 'lost';
+  session.won = won;
+  session.guessCount = session.guesses.length;
+  session.completedAt = new Date();
+  session.durationMs = session.startedAt
+    ? session.completedAt - session.startedAt
+    : null;
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/v1/puzzle/today
-// Returns puzzle metadata — never the answer bird
+// Puzzle metadata only — no session, no answer. Kept for cheap polling.
 // ---------------------------------------------------------------------------
 
 router.get('/today', async (req, res) => {
@@ -120,30 +209,58 @@ router.get('/today', async (req, res) => {
 
   res.json({
     puzzleNumber: puzzle.puzzleNumber,
-    guessLimit: 25,
+    guessLimit: GUESS_LIMIT,
     date: puzzle.dateUtc,
     resetCount: puzzle.resetCount ?? 0,
   });
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/puzzle/state
+// Everything needed to render the game: puzzle meta plus this player's session.
+// Creates the session (and the guest cookie) on first visit. This is the only
+// hydration path — the client persists nothing.
+// ---------------------------------------------------------------------------
+
+router.get('/state', identify, async (req, res) => {
+  const puzzle = await getTodayPuzzle();
+  if (!puzzle) return res.status(404).json({ error: 'No puzzle found for today.' });
+  if (!puzzle.birdId) {
+    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
+  }
+
+  const session = await loadOrCreateSession(req, puzzle);
+  res.json(statePayload(puzzle, session));
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/v1/puzzle/guess
 // ---------------------------------------------------------------------------
 
-router.post('/guess', guessLimiter, async (req, res) => {
-  const { puzzleDate, birdCommonName, guessNumber } = req.body;
-  const today = getPuzzleDate();
+router.post('/guess', guessLimiter, identify, async (req, res) => {
+  const { birdCommonName } = req.body;
 
-  // 1. Validate puzzleDate
-  if (!puzzleDate || puzzleDate !== today) {
-    return res.status(400).json({
-      error: `puzzleDate must be today's UTC date (${today}).`,
-    });
-  }
-
-  // 2. Find the guess bird (case-insensitive)
   if (!birdCommonName || typeof birdCommonName !== 'string') {
     return res.status(400).json({ error: 'birdCommonName is required.' });
+  }
+
+  const puzzle = await getTodayPuzzle();
+  if (!puzzle) return res.status(404).json({ error: 'No puzzle found for today.' });
+
+  const answerBird = puzzle.birdId;
+  if (!answerBird) {
+    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
+  }
+
+  const session = await loadOrCreateSession(req, puzzle);
+
+  // The session, not the request, says whether a guess is allowed. A client that
+  // has lost cannot keep guessing by simply not telling us.
+  if (session.phase !== 'playing') {
+    return res.status(409).json({ error: 'This game is already over.', ...statePayload(puzzle, session) });
+  }
+  if (guessesRemaining(session) <= 0) {
+    return res.status(409).json({ error: 'No guesses remaining.', ...statePayload(puzzle, session) });
   }
 
   const guessBird = await Bird.findOne({
@@ -155,51 +272,43 @@ router.post('/guess', guessLimiter, async (req, res) => {
     return res.status(400).json({ error: `Bird not found: "${birdCommonName}".` });
   }
 
-  // 3. Get today's puzzle
-  const puzzle = await getTodayPuzzle();
-  if (!puzzle) {
-    return res.status(404).json({ error: 'No puzzle found for today.' });
+  // Re-guessing a bird would burn a guess for no information; the picker already
+  // hides them, so this only fires on a stale tab or a hand-rolled request.
+  const already = session.guesses.some(
+    (g) => g.commonName.toLowerCase() === guessBird.commonName.toLowerCase()
+  );
+  if (already) {
+    return res.status(409).json({ error: `You already guessed "${guessBird.commonName}".`, ...statePayload(puzzle, session) });
   }
 
-  // 4. Get the answer bird (already populated by getTodayPuzzle)
-  const answerBird = puzzle.birdId;
+  const correct = guessBird.ncbiTaxId === answerBird.ncbiTaxId;
 
-  // 5. Correct guess?
-  if (guessBird.ncbiTaxId === answerBird.ncbiTaxId) {
-    return res.json({
+  if (correct) {
+    session.guesses.push({
+      birdId: guessBird._id,
+      commonName: guessBird.commonName,
+      guessNumber: session.guesses.length + 1,
       correct: true,
-      guessNumber: guessNumber ?? null,
-      guess: {
-        commonName: guessBird.commonName,
-        scientificName: guessBird.scientificName,
-        ncbiTaxId: guessBird.ncbiTaxId,
-      },
-      answer: {
-        commonName: answerBird.commonName,
-        scientificName: answerBird.scientificName,
-        order: answerBird.order,
-        family: answerBird.family,
-        ncbiUrl: `https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=${answerBird.ncbiTaxId}`,
-        ancestorPath: answerBird.ancestorPath,
-        ancestorNames: answerBird.ancestorNames,
-        ancestorRanks: answerBird.ancestorRanks,
-      },
+      feedbackTemperature: 'correct',
+      lca: null,
+      guessBranch: null,
     });
+    finish(session, true);
+    await session.save();
+    return res.json(statePayload(puzzle, session));
   }
 
-  // 6. Compute LCA
   const lcaResult = computeGuessResult(guessBird, answerBird);
 
-  // 7. Look up LCA rank from TaxonomyNode
+  // Prefer the canonical rank from the taxonomy collection over the one baked
+  // into the bird's denormalized ancestorRanks.
   let lcaRank = lcaResult.lcaRank;
   if (lcaResult.lcaTaxId) {
     const taxNode = await TaxonomyNode.findOne({ taxId: lcaResult.lcaTaxId }).lean();
-    if (taxNode) {
-      lcaRank = taxNode.rank;
-    }
+    if (taxNode) lcaRank = taxNode.rank;
   }
 
-  // 8. The child of the branch point that the guess sits under. The answer left
+  // The child of the branch point that the guess sits under. The answer left
   // the LCA by a different child, so this entire subtree is eliminated — which
   // makes it the deepest node the guess actually proves anything about. The
   // guess's genus lies inside it and therefore adds nothing: ruling out Dromaius
@@ -220,15 +329,12 @@ router.post('/guess', guessLimiter, async (req, res) => {
         }
       : null;
 
-  // 9. Return wrong-guess response (never include answer bird identity).
-  res.json({
+  session.guesses.push({
+    birdId: guessBird._id,
+    commonName: guessBird.commonName,
+    guessNumber: session.guesses.length + 1,
     correct: false,
-    guessNumber: guessNumber ?? null,
-    guess: {
-      commonName: guessBird.commonName,
-      scientificName: guessBird.scientificName,
-      ncbiTaxId: guessBird.ncbiTaxId,
-    },
+    feedbackTemperature: lcaResult.feedbackTemperature,
     lca: {
       taxId: lcaResult.lcaTaxId,
       name: lcaResult.lcaName,
@@ -236,33 +342,20 @@ router.post('/guess', guessLimiter, async (req, res) => {
       depth: lcaResult.lcaDepth,
     },
     guessBranch,
-    feedbackTemperature: lcaResult.feedbackTemperature,
   });
+
+  if (guessesRemaining(session) <= 0) finish(session, false);
+
+  await session.save();
+  res.json(statePayload(puzzle, session));
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/v1/puzzle/hint?level=1|2|3
-// Returns one ancestry node of today's answer at the requested taxonomy level.
-// Level 1 → order, Level 2 → family, Level 3 → genus
-// The client is responsible for deducting the guess cost.
-// ---------------------------------------------------------------------------
-
-router.get('/hint', async (req, res) => {
-  const level = parseInt(req.query.level, 10);
-  if (![1, 2, 3].includes(level)) {
-    return res.status(400).json({ error: 'level must be 1, 2, or 3.' });
-  }
-
-  const puzzle = await getTodayPuzzle();
-  if (!puzzle) {
-    return res.status(404).json({ error: 'No puzzle found for today.' });
-  }
-
-  const bird = puzzle.birdId;
-  if (!bird) {
-    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
-  }
-
+/**
+ * The answer's ancestor at the taxonomy level a hint buys.
+ * Level 1 → order, 2 → family, 3 → genus, each with fallbacks for lineages that
+ * skip the canonical rank.
+ */
+function resolveHintNode(bird, level) {
   const { ancestorPath, ancestorNames, ancestorRanks } = bird;
 
   const primaryRanks = { 1: ['order'], 2: ['family'], 3: ['genus'] };
@@ -272,25 +365,77 @@ router.get('/hint', async (req, res) => {
     3: ['subgenus', 'species group'],
   };
 
-  let hintNode = null;
   for (const rank of [...primaryRanks[level], ...fallbackRanks[level]]) {
     const i = ancestorRanks.indexOf(rank);
     if (i !== -1) {
-      hintNode = {
-        taxId: ancestorPath[i],
-        name: ancestorNames[i],
-        rank: ancestorRanks[i],
-        depth: i,
-      };
-      break;
+      return { taxId: ancestorPath[i], name: ancestorNames[i], rank: ancestorRanks[i], depth: i };
     }
   }
+  return null;
+}
 
+// ---------------------------------------------------------------------------
+// POST /api/v1/puzzle/hint  { level: 1|2|3 }
+// Charges the hint against the guess budget and records the purchase, then
+// returns the revealed node alongside the updated session. The cost is deducted
+// here, not by the client — a hint the server never billed for does not exist.
+// ---------------------------------------------------------------------------
+
+router.post('/hint', identify, async (req, res) => {
+  const level = parseInt(req.body?.level, 10);
+  if (![1, 2, 3].includes(level)) {
+    return res.status(400).json({ error: 'level must be 1, 2, or 3.' });
+  }
+  const hintIndex = level - 1;
+
+  const puzzle = await getTodayPuzzle();
+  if (!puzzle) return res.status(404).json({ error: 'No puzzle found for today.' });
+
+  const bird = puzzle.birdId;
+  if (!bird) {
+    return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
+  }
+
+  const session = await loadOrCreateSession(req, puzzle);
+
+  if (session.phase !== 'playing') {
+    return res.status(409).json({ error: 'This game is already over.', ...statePayload(puzzle, session) });
+  }
+  if (session.purchasedHints.includes(hintIndex)) {
+    return res.status(409).json({ error: 'Hint already revealed.', ...statePayload(puzzle, session) });
+  }
+  if (!arePrerequisitesMet(hintIndex, session.purchasedHints, session.guesses)) {
+    return res.status(409).json({ error: 'Reveal the previous hints first.', ...statePayload(puzzle, session) });
+  }
+
+  // A rank some guess already exposed is visible in the tree for free, so it is
+  // not for sale. Refusing here rather than discounting to zero keeps
+  // guessesRemaining derivable: it prices every purchased hint at HINT_COSTS,
+  // and a zero-cost entry in purchasedHints would silently be billed the full
+  // amount on the next request.
+  if (isDiscoveredViaGuess(HINT_RANKS[hintIndex], session.guesses)) {
+    return res.status(409).json({ error: 'That rank is already visible in the tree.', ...statePayload(puzzle, session) });
+  }
+
+  const cost = HINT_COSTS[hintIndex];
+  if (guessesRemaining(session) < cost) {
+    return res.status(409).json({ error: `Need ${cost} guesses remaining.`, ...statePayload(puzzle, session) });
+  }
+
+  const hintNode = resolveHintNode(bird, level);
   if (!hintNode) {
     return res.status(404).json({ error: `No suitable taxonomy level found for hint ${level}.` });
   }
 
-  res.json({ level, hint: hintNode });
+  session.purchasedHints = [...session.purchasedHints, hintIndex].sort((a, b) => a - b);
+  session.hintNodes.set(String(hintIndex), hintNode);
+  session.hintPurchasedAt = [...session.hintPurchasedAt, session.guesses.length];
+
+  // Buying a hint can exhaust the budget outright, which ends the game.
+  if (guessesRemaining(session) <= 0) finish(session, false);
+
+  await session.save();
+  res.json({ level, hint: hintNode, ...statePayload(puzzle, session) });
 });
 
 // ---------------------------------------------------------------------------
@@ -337,19 +482,18 @@ router.get('/result', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/puzzle/extra-clue?n=0
-// Returns a sanitized sentence from the answer bird's Wikipedia article.
-// The bird's common and scientific name are stripped from the text so no
-// identity information reaches the client. Available after genus is revealed
-// (enforced client-side; server only validates puzzle exists).
+// POST /api/v1/puzzle/extra-clue
+// Charges EXTRA_CLUE_COST and appends the next sanitized sentence from the
+// answer bird's Wikipedia article. The bird's common and scientific name are
+// stripped from the text so no identity information reaches the client.
+// Which clue you get is the session's next one — the client cannot pick.
+// Gated on genus being revealed, enforced here rather than client-side.
 // ---------------------------------------------------------------------------
 
 const WIKI_UA = 'MetaAvian/1.0 (https://metaavian.com)';
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-router.get('/extra-clue', async (req, res) => {
-  const n = Math.max(0, parseInt(req.query.n || '0', 10));
-
+router.post('/extra-clue', identify, async (req, res) => {
   const puzzle = await getTodayPuzzle();
   if (!puzzle) return res.status(404).json({ error: 'No puzzle found for today.' });
 
@@ -358,6 +502,19 @@ router.get('/extra-clue', async (req, res) => {
     return res.status(503).json({ error: 'Puzzle bird data unavailable. Please try again shortly.' });
   }
 
+  const session = await loadOrCreateSession(req, puzzle);
+
+  if (session.phase !== 'playing') {
+    return res.status(409).json({ error: 'This game is already over.', ...statePayload(puzzle, session) });
+  }
+  if (!isGenusRevealed(session)) {
+    return res.status(409).json({ error: 'Reveal the genus first.', ...statePayload(puzzle, session) });
+  }
+  if (guessesRemaining(session) < EXTRA_CLUE_COST) {
+    return res.status(409).json({ error: `Need ${EXTRA_CLUE_COST} guesses remaining.`, ...statePayload(puzzle, session) });
+  }
+
+  const n = session.extraClues.length;
   const cacheKey = `extra_clues_${bird.ncbiTaxId}`;
 
   let clues = cache.get(cacheKey);
@@ -390,7 +547,11 @@ router.get('/extra-clue', async (req, res) => {
     return res.status(404).json({ error: 'No more clues available.' });
   }
 
-  res.json({ clue: clues[n], clueNumber: n + 1, total: clues.length });
+  session.extraClues = [...session.extraClues, clues[n]];
+  if (guessesRemaining(session) <= 0) finish(session, false);
+
+  await session.save();
+  res.json({ clue: clues[n], clueNumber: n + 1, total: clues.length, ...statePayload(puzzle, session) });
 });
 
 // ---------------------------------------------------------------------------
