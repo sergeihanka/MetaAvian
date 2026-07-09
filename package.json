@@ -5,7 +5,7 @@
   "type": "module",
   "engines": {
     "node": "24.x",
-    "npm": ">=10.x"
+    "npm": "11.x"
   },
   "main": "server.js",
   "scripts": {
