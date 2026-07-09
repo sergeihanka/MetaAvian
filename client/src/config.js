@@ -1,5 +1,7 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 export const GUESS_LIMIT = 25;
+/** Hour (Central Time) at which each new puzzle releases. Must match the server. */
+export const RESET_HOUR_CENTRAL = 8;
 export const TOKEN_KEY = 'aviary_token';
 export const GAME_STATE_KEY_PREFIX = 'aviary_game_';
 export const BIRD_LIST_KEY = 'aviary_bird_list';

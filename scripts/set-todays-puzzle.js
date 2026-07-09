@@ -15,7 +15,7 @@ import Bird from '../src/models/Bird.js';
 import DailyPuzzle from '../src/models/DailyPuzzle.js';
 
 function getPuzzleDate() {
-  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
+  const shifted = new Date(Date.now() - 8 * 60 * 60 * 1000);
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
 }
 

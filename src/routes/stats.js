@@ -2,9 +2,25 @@ import { Router } from 'express';
 import GameSession from '../models/GameSession.js';
 import { optionalAuth, requireAuth } from '../middleware/authMiddleware.js';
 
+/** Hour (Central Time) at which each new puzzle releases. Must match puzzle.js. */
+const RESET_HOUR_CENTRAL = 8;
+
+const dateHourDtf = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Chicago',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  hour12: false,
+});
+
+/** Current puzzle date (YYYY-MM-DD). Mirrors getPuzzleDate() in puzzle.js. */
 function getPuzzleDate() {
-  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
+  const p = Object.fromEntries(dateHourDtf.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const hour = parseInt(p.hour, 10) % 24;
+  let ms = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
+  if (hour < RESET_HOUR_CENTRAL) ms -= 24 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 const router = Router();
@@ -74,7 +90,7 @@ router.post('/session', optionalAuth, async (req, res) => {
 // GET /api/v1/stats/session/today
 // Returns the authenticated user's session for today's puzzle, including the
 // full gameState blob so any device can restore a completed game. TTL is
-// implicit: "today" is recomputed on every request using the same 9 AM Central
+// implicit: "today" is recomputed on every request using the same 8 AM Central
 // rollover logic used by the puzzle engine.
 // ---------------------------------------------------------------------------
 

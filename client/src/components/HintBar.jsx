@@ -27,9 +27,9 @@ function isDiscoveredViaGuess(rank, guesses) {
 }
 
 // True if all earlier hints are either purchased or discovered via guess.
-function isPreviousAvailable(hintIndex, hintsUsed, guesses) {
+function isPreviousAvailable(hintIndex, purchasedHints, guesses) {
   for (let i = 0; i < hintIndex; i++) {
-    if (hintsUsed > i) continue;                          // purchased
+    if (purchasedHints.includes(i)) continue;                   // purchased
     if (isDiscoveredViaGuess(HINTS[i].rank, guesses)) continue; // in tree
     return false;
   }
@@ -38,14 +38,14 @@ function isPreviousAvailable(hintIndex, hintsUsed, guesses) {
 
 export default function HintBar() {
   const { state, dispatch } = useGame();
-  const { guessesRemaining, hintsUsed = 0, hintNodes = [], extraClues = [], phase } = state;
+  const { guessesRemaining, purchasedHints = [], hintNodes = {}, extraClues = [], phase } = state;
   const guesses = state.guesses || [];
   const [loading, setLoading] = useState(false);
 
   const isGameOver = phase === 'won' || phase === 'lost';
 
   // Genus is considered revealed if purchased OR discovered via a hot guess
-  const genusRevealed = hintsUsed >= 3 || isDiscoveredViaGuess('genus', guesses);
+  const genusRevealed = purchasedHints.includes(2) || isDiscoveredViaGuess('genus', guesses);
 
   async function handleHint(hint) {
     if (loading || isGameOver) return;
@@ -87,9 +87,9 @@ export default function HintBar() {
         </Typography>
 
         {HINTS.map((hint) => {
-          const purchased = hintsUsed > hint.index;
+          const purchased = purchasedHints.includes(hint.index);
           const discovered = !purchased && isDiscoveredViaGuess(hint.rank, guesses);
-          const prereqMet = isPreviousAvailable(hint.index, hintsUsed, guesses);
+          const prereqMet = isPreviousAvailable(hint.index, purchasedHints, guesses);
           const canAfford = guessesRemaining >= hint.cost;
           const available = !purchased && !discovered && prereqMet && canAfford && !isGameOver;
           const revealed = purchased ? hintNodes[hint.index] : null;

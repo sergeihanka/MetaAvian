@@ -5,6 +5,7 @@ import {
   BIRD_LIST_KEY,
   BIRD_LIST_DATE_KEY,
   GUESS_LIMIT,
+  RESET_HOUR_CENTRAL,
 } from '../config.js';
 
 // ────────────────────────────────────────────────────────────
@@ -20,9 +21,27 @@ function parseJwt(token) {
   }
 }
 
+const dateHourDtf = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Chicago',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  hour12: false,
+});
+
+/**
+ * Current puzzle date (YYYY-MM-DD). Must match getPuzzleDate() on the server —
+ * the guess endpoint rejects any other date. Step back a calendar day before the
+ * reset hour rather than subtracting hours from the instant, which would drift
+ * by an hour on DST transition days.
+ */
 function getPuzzleDate() {
-  const shifted = new Date(Date.now() - 9 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(shifted);
+  const p = Object.fromEntries(dateHourDtf.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const hour = parseInt(p.hour, 10) % 24;
+  let ms = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
+  if (hour < RESET_HOUR_CENTRAL) ms -= 24 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 function getGameStateKey(date, resetCount) {
@@ -37,33 +56,70 @@ const AVES_ROOT = { taxId: 8782, name: 'Aves', rank: 'class', depth: 0 };
 // ────────────────────────────────────────────────────────────
 
 /**
- * Build updated treeNodes Map and treeEdges array from a normalized guess.
- * Only shows: Aves root, LCA node(s), guess leaves, and mystery "?" node.
- * Mystery is placed as sibling of the leaf at the deepest (hottest) LCA.
+ * An LCA (where a wrong guess branched away from the mystery bird) or a
+ * purchased hint always sits on the mystery bird's own lineage, so together they
+ * form a single chain ordered by depth: the "spine". The mystery hangs off the
+ * deepest spine node we know about.
+ *
+ * Everything else — guess leaves and the genera those guesses belong to — hangs
+ * off the spine at the point it diverged, recorded on the node as parentId. A
+ * guessed bird's genus is NOT on the mystery's lineage, so it must never join
+ * the spine or it would drag the mystery node down a dead-end branch.
+ *
+ * Edges are derived from the node set rather than accumulated, so the tree stays
+ * correct no matter what order guesses and hints arrive in.
+ */
+function finalizeTree(nodes) {
+  const spine = Array.from(nodes.values())
+    .filter((n) => (n.isLca || n.isHint) && n.taxId !== AVES_ROOT.taxId)
+    .sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+
+  const edges = [];
+  let deepestId = AVES_ROOT.taxId;
+  let deepestDepth = AVES_ROOT.depth;
+  for (const n of spine) {
+    edges.push({ parentId: deepestId, childId: n.taxId });
+    deepestId = n.taxId;
+    deepestDepth = n.depth ?? deepestDepth;
+  }
+
+  for (const n of nodes.values()) {
+    if (n.isMystery || n.parentLcaTaxId == null) continue;
+    edges.push({ parentId: n.parentLcaTaxId, childId: n.taxId });
+  }
+
+  const mystery = nodes.get('mystery') || {
+    taxId: 'mystery',
+    name: '?',
+    commonName: 'Mystery Bird',
+    rank: 'species',
+    isLeaf: true,
+    isMystery: true,
+  };
+  nodes.set('mystery', { ...mystery, depth: deepestDepth + 1, parentLcaTaxId: deepestId });
+  edges.push({ parentId: deepestId, childId: 'mystery' });
+
+  return { treeNodes: nodes, treeEdges: edges };
+}
+
+/**
+ * Build the updated tree from a normalized guess.
+ *
+ * A wrong guess contributes exactly two things: the guessed bird's leaf, and the
+ * node where it branches away from the mystery bird (the LCA). Nothing else —
+ * no intermediate ancestry of the wrong guess.
  *
  * Normalized guess shape:
  *   { commonName, feedbackTemperature, lca: { taxId, name, rank, depth }, correct, answer }
  */
-function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
+function buildTreeUpdate(prevNodes, normalizedGuess) {
   const nodes = new Map(prevNodes);
 
   if (!nodes.has(AVES_ROOT.taxId)) {
     nodes.set(AVES_ROOT.taxId, { ...AVES_ROOT });
   }
 
-  // Copy all non-mystery edges (mystery edge is always rebuilt from scratch)
-  const edgeSet = new Set();
-  const edges = [];
-  for (const e of prevEdges) {
-    if (e.childId === 'mystery') continue;
-    const key = `${e.parentId}->${e.childId}`;
-    if (!edgeSet.has(key)) {
-      edgeSet.add(key);
-      edges.push(e);
-    }
-  }
-
-  // Correct guess — reveal the full taxonomy chain then place mystery at the leaf
+  // Correct guess — reveal the answer's full lineage, then the answer itself
   if (normalizedGuess.correct) {
     const { answer } = normalizedGuess;
     const ancestorPath  = answer?.ancestorPath  || [];
@@ -71,189 +127,129 @@ function buildTreeUpdate(prevNodes, prevEdges, normalizedGuess) {
     const ancestorRanks = answer?.ancestorRanks || [];
     const revealedName  = answer?.commonName || normalizedGuess.commonName;
 
-    // IDs in the answer's chain below Aves root (used to clean stale shortcut edges)
-    const chainIds = new Set(ancestorPath.slice(1));
-
-    // Drop old mystery edge + any wrong-guess "Aves → chainNode" shortcut edges
-    const cleanEdges = edges.filter(
-      (e) => e.childId !== 'mystery' &&
-             !(e.parentId === AVES_ROOT.taxId && chainIds.has(e.childId))
-    );
-    const edgeSet = new Set(cleanEdges.map((e) => `${e.parentId}->${e.childId}`));
-
-    // Default: keep mystery where it was if we have no chain data
-    let mysteryParentId = (nodes.get('mystery') || {}).parentLcaTaxId || AVES_ROOT.taxId;
-
-    if (ancestorPath.length > 1) {
-      let prevId = AVES_ROOT.taxId;
-      for (let i = 1; i < ancestorPath.length; i++) {
-        const taxId = ancestorPath[i];
-        const name  = ancestorNames[i];
-        const rank  = ancestorRanks[i];
-
-        if (rank === 'species') {
-          // Mystery replaces the species leaf — stop here
-          mysteryParentId = prevId;
-          break;
-        }
-
-        // Preserve isHint flag if node was already revealed via a hint
-        const existing = nodes.get(taxId) || {};
-        nodes.set(taxId, { ...existing, taxId, name, rank, depth: i, isLca: true });
-
-        const key = `${prevId}->${taxId}`;
-        if (!edgeSet.has(key)) {
-          edgeSet.add(key);
-          cleanEdges.push({ parentId: prevId, childId: taxId });
-        }
-        prevId = taxId;
-        mysteryParentId = taxId; // fallback if no species rank found
-      }
+    for (let i = 1; i < ancestorPath.length; i++) {
+      if (ancestorRanks[i] === 'species') break; // the species leaf IS the mystery node
+      const taxId = ancestorPath[i];
+      const existing = nodes.get(taxId) || {}; // preserve isHint on already-revealed nodes
+      nodes.set(taxId, {
+        ...existing,
+        taxId,
+        name: ancestorNames[i],
+        rank: ancestorRanks[i],
+        depth: i,
+        isLca: true,
+      });
     }
 
     const existingMystery = nodes.get('mystery') || {};
     nodes.set('mystery', {
       ...existingMystery,
+      taxId: 'mystery',
       name: revealedName,
       commonName: revealedName,
+      rank: 'species',
       feedbackTemperature: 'correct',
       isRevealed: true,
       isMystery: true,
       isLeaf: true,
     });
-    cleanEdges.push({ parentId: mysteryParentId, childId: 'mystery' });
-    return { treeNodes: nodes, treeEdges: cleanEdges };
+
+    return finalizeTree(nodes);
   }
 
-  const { lca, feedbackTemperature, commonName, ancestorNodes } = normalizedGuess;
+  const { lca, guessGenus, feedbackTemperature, commonName } = normalizedGuess;
   const lcaTaxId = lca?.taxId;
-  const lcaDepth = lca?.depth ?? 1;
+  const lcaDepth = lca?.depth ?? AVES_ROOT.depth;
 
-  // Add LCA node (skip if it IS the Aves root)
+  // The branch-away point. If it is the Aves root the guess shares nothing else
+  // with the answer, so the leaf hangs straight off the root.
+  let branchId = AVES_ROOT.taxId;
+  let branchDepth = AVES_ROOT.depth;
   if (lcaTaxId && lcaTaxId !== AVES_ROOT.taxId) {
+    const existing = nodes.get(lcaTaxId) || {};
     nodes.set(lcaTaxId, {
+      ...existing,
       taxId: lcaTaxId,
       name: lca.name,
       rank: lca.rank,
       depth: lcaDepth,
       isLca: true,
     });
-    const k = `${AVES_ROOT.taxId}->${lcaTaxId}`;
-    if (!edgeSet.has(k)) {
-      edgeSet.add(k);
-      edges.push({ parentId: AVES_ROOT.taxId, childId: lcaTaxId });
-    }
+    branchId = lcaTaxId;
+    branchDepth = lcaDepth;
   }
 
-  // Chain intermediate taxonomy nodes (family, genus, etc.) between LCA and leaf.
-  // These are the guess bird's own ancestry — clues about the wrong guess only.
-  let deepestAncestorId = lcaTaxId && lcaTaxId !== AVES_ROOT.taxId ? lcaTaxId : AVES_ROOT.taxId;
-  let deepestAncestorDepth = lcaDepth;
-  if (ancestorNodes && ancestorNodes.length > 0) {
-    for (const iNode of ancestorNodes) {
-      nodes.set(iNode.taxId, {
-        taxId: iNode.taxId,
-        name: iNode.name,
-        rank: iNode.rank,
-        depth: iNode.depth,
-        isIntermediateAncestor: true,
-      });
-      const ek = `${deepestAncestorId}->${iNode.taxId}`;
-      if (!edgeSet.has(ek)) {
-        edgeSet.add(ek);
-        edges.push({ parentId: deepestAncestorId, childId: iNode.taxId });
-      }
-      deepestAncestorId = iNode.taxId;
-      deepestAncestorDepth = iNode.depth;
-    }
+  // The guess's own genus, when it lies below the branch point. This is the
+  // level players eliminate at: two wrong guesses in one family are only
+  // distinguishable once their genera are drawn. Guesses sharing a genus reuse
+  // the same node. It is a dead-end branch, never part of the spine.
+  //
+  // Depth is the parent's depth + 1, not the genus's true rank depth. Ancestor
+  // paths vary in length between birds (house sparrow carries an extra rank
+  // above Passer), so raw depths would strand one genus down on the leaf row.
+  // Off-spine nodes only need to render one level below whatever they hang from.
+  let parentId = branchId;
+  let parentDepth = branchDepth;
+  if (guessGenus && guessGenus.taxId !== branchId) {
+    const existing = nodes.get(guessGenus.taxId) || {};
+    nodes.set(guessGenus.taxId, {
+      ...existing,
+      taxId: guessGenus.taxId,
+      name: guessGenus.name,
+      rank: guessGenus.rank,
+      depth: branchDepth + 1,
+      isGuessGenus: true,
+      parentLcaTaxId: branchId,
+    });
+    parentId = guessGenus.taxId;
+    parentDepth = branchDepth + 1;
   }
 
-  // Add guess leaf — connected to deepest intermediate node (or LCA if none)
   const leafId = `leaf_${commonName}`;
   nodes.set(leafId, {
     taxId: leafId,
     name: commonName,
     commonName,
     rank: 'species',
-    depth: deepestAncestorDepth + 1,
+    depth: parentDepth + 1,
     isLeaf: true,
     feedbackTemperature,
-    parentLcaTaxId: deepestAncestorId,
+    parentLcaTaxId: parentId,
   });
-  const leafKey = `${deepestAncestorId}->${leafId}`;
-  if (!edgeSet.has(leafKey)) {
-    edgeSet.add(leafKey);
-    edges.push({ parentId: deepestAncestorId, childId: leafId });
-  }
 
-  // Place mystery below the deepest known LCA or hint node on the answer path.
-  // Never reveal answer-side intermediate nodes — mystery stays opaque.
-  let bestParentId = AVES_ROOT.taxId;
-  let bestDepth = AVES_ROOT.depth;
-  for (const [, node] of nodes) {
-    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestDepth) {
-      bestDepth = node.depth;
-      bestParentId = node.taxId;
-    }
-  }
-
-  nodes.set('mystery', {
-    taxId: 'mystery',
-    name: '?',
-    commonName: 'Mystery Bird',
-    rank: 'species',
-    depth: bestDepth + 1,
-    isLeaf: true,
-    isMystery: true,
-    parentLcaTaxId: bestParentId,
-  });
-  edges.push({ parentId: bestParentId, childId: 'mystery' });
-
-  return { treeNodes: nodes, treeEdges: edges };
+  return finalizeTree(nodes);
 }
 
 /**
- * Add a hint node to the tree and move the mystery node below it.
- * hintIndex: 0-based index of this hint (0=order, 1=family, 2=genus)
- * allHintNodes: the full hint array AFTER appending the new node
+ * Add a purchased hint node to the tree. It joins the spine at its own depth,
+ * so hints bought out of sequence (because an earlier rank was already exposed
+ * by a guess) still nest correctly.
  */
-function applyHintToTree(prevNodes, prevEdges, newHintNode, hintIndex, allHintNodes) {
+function applyHintToTree(prevNodes, newHintNode) {
   const nodes = new Map(prevNodes);
+  const existing = nodes.get(newHintNode.taxId) || {};
+  nodes.set(newHintNode.taxId, { ...existing, ...newHintNode, isHint: true });
+  return finalizeTree(nodes);
+}
 
-  // Strip old mystery edge; rebuild it at the end
-  const edges = prevEdges.filter((e) => e.childId !== 'mystery');
-  const edgeSet = new Set(edges.map((e) => `${e.parentId}->${e.childId}`));
-
-  // Add the hint node
-  nodes.set(newHintNode.taxId, { ...newHintNode, isHint: true });
-
-  // Chain: Aves → hint0 → hint1 → hint2
-  const parentId = hintIndex === 0 ? AVES_ROOT.taxId : allHintNodes[hintIndex - 1].taxId;
-  const hintEdgeKey = `${parentId}->${newHintNode.taxId}`;
-  if (!edgeSet.has(hintEdgeKey)) {
-    edgeSet.add(hintEdgeKey);
-    edges.push({ parentId, childId: newHintNode.taxId });
+/**
+ * Read hint state from a saved game. Games saved before hints were tracked by
+ * index stored `hintsUsed` (a prefix count) and `hintNodes` as a dense array,
+ * which could only ever describe hints bought in order — restore them that way.
+ */
+function migrateHintState(saved) {
+  if (Array.isArray(saved.purchasedHints)) {
+    return { purchasedHints: saved.purchasedHints, hintNodes: saved.hintNodes || {} };
   }
-
-  // Move mystery below the deepest known LCA or hint node
-  let bestParentId = AVES_ROOT.taxId;
-  let bestParentDepth = AVES_ROOT.depth;
-  for (const [, node] of nodes) {
-    if ((node.isLca || node.isHint) && (node.depth ?? 0) > bestParentDepth) {
-      bestParentDepth = node.depth;
-      bestParentId = node.taxId;
-    }
+  const legacyNodes = Array.isArray(saved.hintNodes) ? saved.hintNodes : [];
+  const count = saved.hintsUsed || 0;
+  const purchasedHints = [];
+  const hintNodes = {};
+  for (let i = 0; i < count; i++) {
+    purchasedHints.push(i);
+    if (legacyNodes[i]) hintNodes[i] = legacyNodes[i];
   }
-
-  const existingMystery = nodes.get('mystery') || {};
-  nodes.set('mystery', {
-    ...existingMystery,
-    depth: bestParentDepth + 1,
-    parentLcaTaxId: bestParentId,
-  });
-  edges.push({ parentId: bestParentId, childId: 'mystery' });
-
-  return { treeNodes: nodes, treeEdges: edges };
+  return { purchasedHints, hintNodes };
 }
 
 // ────────────────────────────────────────────────────────────
@@ -276,8 +272,12 @@ const initialState = {
 
   birdList: [],
 
-  hintsUsed: 0,
-  hintNodes: [],
+  // Hints can be bought out of sequence: a guess may already have exposed the
+  // order, letting you buy Family without ever paying for Order. So track WHICH
+  // hints were bought, never just how many — a count would silently bill you for
+  // the cheaper hints you skipped.
+  purchasedHints: [],  // hint indices bought, ascending (0=order, 1=family, 2=genus)
+  hintNodes: {},       // hint index → revealed taxonomy node
   extraClues: [],
   hintPurchasedAt: [], // guesses.length at the moment each hint was bought
 
@@ -339,8 +339,7 @@ function reducer(state, action) {
         treeNodes: restoredNodes,
         treeEdges: saved.treeEdges || [],
         showResults: saved.phase === 'won' || saved.phase === 'lost',
-        hintsUsed: saved.hintsUsed || 0,
-        hintNodes: saved.hintNodes || [],
+        ...migrateHintState(saved),
         extraClues: saved.extraClues || [],
         hintPurchasedAt: saved.hintPurchasedAt || [],
       };
@@ -353,19 +352,15 @@ function reducer(state, action) {
         commonName: payload.guess?.commonName || '',
         feedbackTemperature: payload.feedbackTemperature || (payload.correct ? 'correct' : 'cold'),
         lca: payload.lca || null,
+        guessGenus: payload.guessGenus || null,
         correct: payload.correct || false,
         answer: payload.answer || null,
-        ancestorNodes: payload.ancestorNodes || [],
       };
 
       const newGuesses = [...state.guesses, guess];
       const newGuessesRemaining = state.guessesRemaining - 1;
 
-      const { treeNodes, treeEdges } = buildTreeUpdate(
-        state.treeNodes,
-        state.treeEdges,
-        guess
-      );
+      const { treeNodes, treeEdges } = buildTreeUpdate(state.treeNodes, guess);
 
       let phase = 'playing';
       let showResults = state.showResults;
@@ -392,14 +387,13 @@ function reducer(state, action) {
 
     case 'REVEAL_HINT': {
       const { hintNode, hintIndex, cost } = action.payload;
-      const newHintNodes = [...state.hintNodes, hintNode];
-      const { treeNodes, treeEdges } = applyHintToTree(
-        state.treeNodes, state.treeEdges, hintNode, hintIndex, newHintNodes
-      );
+      if (state.purchasedHints.includes(hintIndex)) return state;
+
+      const { treeNodes, treeEdges } = applyHintToTree(state.treeNodes, hintNode);
       return {
         ...state,
-        hintsUsed: hintIndex + 1,
-        hintNodes: newHintNodes,
+        purchasedHints: [...state.purchasedHints, hintIndex].sort((a, b) => a - b),
+        hintNodes: { ...state.hintNodes, [hintIndex]: hintNode },
         hintPurchasedAt: [...state.hintPurchasedAt, state.guesses.length],
         guessesRemaining: state.guessesRemaining - cost,
         treeNodes,
@@ -469,7 +463,7 @@ function persistGameState(state) {
     phase: state.phase,
     treeNodes: Object.fromEntries(state.treeNodes),
     treeEdges: state.treeEdges,
-    hintsUsed: state.hintsUsed,
+    purchasedHints: state.purchasedHints,
     hintNodes: state.hintNodes,
     extraClues: state.extraClues,
     hintPurchasedAt: state.hintPurchasedAt,
@@ -518,12 +512,14 @@ export function GameProvider({ children }) {
     }
   }, []);
 
-  // Persist on guess
+  // Persist whenever anything the player spent a guess on changes. Watching only
+  // `guesses` meant buying a hint and reloading before the next guess restored a
+  // stale save: the hint vanished from the tree and its cost was refunded.
   useEffect(() => {
-    if (state.guesses.length > 0 && state.puzzleDate) {
-      persistGameState(state);
-    }
-  }, [state.guesses, state.phase]);
+    if (!state.puzzleDate) return;
+    if (state.guesses.length === 0 && state.purchasedHints.length === 0) return;
+    persistGameState(state);
+  }, [state.guesses, state.phase, state.purchasedHints, state.extraClues]);
 
   return (
     <GameContext.Provider value={{ state, dispatch, loadGameState, getPuzzleDate }}>
