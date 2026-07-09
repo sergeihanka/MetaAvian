@@ -18,6 +18,19 @@ function allBirds() {
   return mongoose.connection.db.collection('allbirds');
 }
 
+/**
+ * allbirds stores `order` and `family` as top-level scalars, but never `genus` —
+ * it lives only in the parallel ancestor arrays. Reading `bird.genus` yields
+ * undefined, which silently drops the narrowest (and most useful) match tier.
+ * Match on the genus taxId instead: every bird in the genus carries it in its
+ * own ancestorPath.
+ */
+function genusOf(bird) {
+  const i = bird.ancestorRanks?.indexOf('genus') ?? -1;
+  if (i === -1) return null;
+  return { taxId: bird.ancestorPath[i], name: bird.ancestorNames[i] };
+}
+
 // GET /api/v1/wiki?q=term — Wikipedia page summary
 router.get('/', async (req, res) => {
   const q = (req.query.q || '').trim();
@@ -67,11 +80,12 @@ router.get('/related', async (req, res) => {
   }
 
   // Try most-specific taxonomy first, widen if too few results
+  const genus = genusOf(bird);
   const levels = [
-    { field: 'genus',  value: bird.genus,  label: bird.genus },
-    { field: 'family', value: bird.family, label: bird.family },
-    { field: 'order',  value: bird.order,  label: bird.order },
-  ].filter(l => l.value);
+    genus && { matchedOn: 'genus', label: genus.name, filter: { ancestorPath: genus.taxId } },
+    bird.family && { matchedOn: 'family', label: bird.family, filter: { family: bird.family } },
+    bird.order && { matchedOn: 'order', label: bird.order, filter: { order: bird.order } },
+  ].filter(Boolean);
 
   let related = [];
   let matchedOn = null;
@@ -80,7 +94,7 @@ router.get('/related', async (req, res) => {
   for (const level of levels) {
     const hits = await col
       .find(
-        { [level.field]: level.value, commonName: { $not: nameRx } },
+        { ...level.filter, commonName: { $not: nameRx } },
         { projection: { commonName: 1, _id: 0 } }
       )
       .limit(8)
@@ -88,7 +102,7 @@ router.get('/related', async (req, res) => {
 
     if (hits.length > 0) {
       related = hits;
-      matchedOn = level.field;
+      matchedOn = level.matchedOn;
       groupName = level.label;
       break;
     }
