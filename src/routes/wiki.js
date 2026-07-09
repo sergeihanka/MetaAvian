@@ -11,8 +11,11 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Read from whichever database MONGODB_URI points at. Pinning the name to
+// 'aviary' made every non-prod environment resolve related birds against the
+// production database instead of its own.
 function allBirds() {
-  return mongoose.connection.useDb('aviary').collection('allbirds');
+  return mongoose.connection.db.collection('allbirds');
 }
 
 // GET /api/v1/wiki?q=term — Wikipedia page summary
@@ -44,7 +47,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/v1/wiki/related?name=African+Ostrich
-// Looks up the bird in aviary.allbirds and returns nearby birds (same genus → family → order).
+// Looks up the bird in allbirds and returns nearby birds (same genus → family → order).
 router.get('/related', async (req, res) => {
   const name = (req.query.name || '').trim();
   if (!name) return res.status(400).json({ error: 'name is required' });

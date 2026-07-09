@@ -157,7 +157,7 @@ export default function App() {
         phase: state.phase,
         treeNodes: Object.fromEntries(state.treeNodes),
         treeEdges: state.treeEdges,
-        hintsUsed: state.hintsUsed,
+        purchasedHints: state.purchasedHints,
         hintNodes: state.hintNodes,
         extraClues: state.extraClues,
         hintPurchasedAt: state.hintPurchasedAt,

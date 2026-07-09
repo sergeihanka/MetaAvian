@@ -21,13 +21,11 @@ const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
 
-const HINT_COSTS = [3, 4, 5];
-
 export default function ResultsModal() {
   const { state, dispatch } = useGame();
   const {
-    showResults, phase, guesses, puzzleNumber, guessLimit,
-    hintsUsed = 0, hintPurchasedAt = [],
+    showResults, phase, guesses, puzzleNumber, guessLimit, guessesRemaining,
+    hintPurchasedAt = [],
   } = state;
   const [snackOpen, setSnackOpen] = useState(false);
 
@@ -38,10 +36,10 @@ export default function ResultsModal() {
   const correctGuess = guesses.find((g) => g.feedbackTemperature === 'correct');
   const answerBird = correctGuess || lastGuess;
 
-  // Effective total: actual guesses + sum of all hint costs
-  const totalHintCost = HINT_COSTS.slice(0, hintsUsed).reduce((a, b) => a + b, 0);
-  const guessCount = guesses.length;
-  const effectiveGuesses = guessCount + totalHintCost;
+  // Everything that costs you — guesses, the specific hints you bought, extra
+  // clues — is already deducted from guessesRemaining. Deriving the score from
+  // it keeps the result identical to the counter the player watched all game.
+  const effectiveGuesses = guessLimit - guessesRemaining;
 
   // Build emoji row: interleave ❔ with guess boxes in the order they occurred.
   // hintPurchasedAt[i] = guesses.length at the moment hint i was bought.
